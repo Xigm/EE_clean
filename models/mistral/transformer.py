@@ -13,8 +13,6 @@ from .lora import LoRALinear
 from .moe import MoeLayer
 from .rope import apply_rotary_emb, precompute_freqs_cis
 
-from safetensors.torch import load_file
-
 
 def repeat_kv(keys: torch.Tensor, values: torch.Tensor, repeats: int, dim: int):
     keys = torch.repeat_interleave(keys, repeats=repeats, dim=dim)
@@ -64,13 +62,11 @@ class Attention(nn.Module):
 
         self.wo = MaybeLora(args.n_heads * args.head_dim, args.dim, bias=False)
 
-        self.register_buffer("bias", torch.tril(torch.ones(args.block_size, args.block_size))
-                                        .view(1, args.block_size, args.block_size))
-
     def forward(
         self,
         x: torch.Tensor,
-        freqs_cis: torch.Tensor
+        freqs_cis: torch.Tensor,
+        mask: AttentionBias,
     ) -> torch.Tensor:
         seqlen_sum, _ = x.shape
 
@@ -88,16 +84,8 @@ class Attention(nn.Module):
 
         # xformers requires (B=1, S, H, D)
         xq, key, val = xq[None, ...], key[None, ...], val[None, ...]
+        output = memory_efficient_attention(xq, key, val, mask)
 
-        # Write the attention function the old fashioned way
-        att = (xq @ key.transpose(-2, -1)) * (1.0 / torch.sqrt(key.size(-1)))
-        att = att.masked_fill(self.bias[:,:seqlen_sum,:seqlen_sum] == 0, float('-inf'))
-        att = torch.functional.softmax(att, dim=-1)
-        att = self.attn_dropout(att)
-        y = att @ val # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        output = y.transpose(1, 2).contiguous().view(B, seqlen_sum, C) # re-assemble all head outputs side by side
-
-        # output projection
         return self.wo(output.view(seqlen_sum, -1))
 
 
@@ -233,43 +221,6 @@ class Transformer(nn.Module):
 
         return self.output(self.norm(h)).float()
 
-    @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
-        """
-        Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-        the sequence max_new_tokens times, feeding the predictions back into the model each time.
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
-        for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = torch.functional.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
-
-        return idx
-
-
-    @torch.no_grad()
-    def from_pretrained(self, path, dtype: torch.dtype = torch.bfloat16):
-    
-        sd_hf = load_file(path, device = 'cpu')
-
-        for k, v in sd_hf.items():
-            sd_hf[k] = v.to(dtype)
-
-        self.load_state_dict(sd_hf)
 
 def positions_from_sizes(sizes: Iterable[int], device):
     return torch.tensor(
@@ -277,4 +228,3 @@ def positions_from_sizes(sizes: Iterable[int], device):
         dtype=torch.long,
         device=device,
     )
-
