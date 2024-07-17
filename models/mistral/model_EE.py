@@ -287,6 +287,24 @@ class Transformer(nn.Module):
             h = layer(h, freqs_cis, load_caches)
 
         return self.output(self.norm(h)).float()
+    
+    def forward_inference(
+        self,
+        input_ids: torch.Tensor,
+        seqlens: List[int],
+    ) -> torch.Tensor:
+        assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
+
+        h = self.tok_embeddings(input_ids)
+        positions = positions_from_sizes(seqlens, self.freqs_cis.device)
+        # att_mask = BlockDiagonalCausalMask.from_seqlens(seqlens)
+
+        freqs_cis = self.freqs_cis[positions].to(device=h.device)
+
+        for layer in self.layers:
+            h = layer.forward_inference(h, freqs_cis)
+
+        return self.output(self.norm(h)).float()
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
