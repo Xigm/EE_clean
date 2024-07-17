@@ -39,6 +39,6 @@ if model_choice == "mistral":
     decode = lambda l: enc.decode(l.tolist())
 
 with torch.no_grad():
-    output = model.generate(encode("Nvidia is a very famous company which produces"), max_new_tokens=tokens_generated, top_k = 20)
+    output = model.generate(encode("Nvidia is a very famous company which produces"),temperature=1e-5, max_new_tokens=tokens_generated, top_k = 20)
 
 print(decode(output))

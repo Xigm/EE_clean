@@ -80,8 +80,8 @@ class Attention(nn.Module):
 
         # register buffer for k and v caches
         if load_caches:
-            self.register_buffer("k", torch.zeros(self.args.block_size, self.n_kv_heads, self.args.head_dim))
-            self.register_buffer("v", torch.zeros(self.args.block_size, self.n_kv_heads, self.args.head_dim))
+            self.register_buffer("k", torch.zeros((self.args.block_size, self.n_kv_heads, self.args.head_dim), device = x.device).to(x.dtype))
+            self.register_buffer("v", torch.zeros((self.args.block_size, self.n_kv_heads, self.args.head_dim), device = x.device).to(x.dtype))
 
             self.k[:seqlen_sum, :, :] = xk.view(seqlen_sum, self.n_kv_heads, self.args.head_dim)
             self.v[:seqlen_sum, :, :] = xv.view(seqlen_sum, self.n_kv_heads, self.args.head_dim)
@@ -115,16 +115,16 @@ class Attention(nn.Module):
         freqs_cis: torch.Tensor,
         ) -> torch.Tensor:
         
-        seqlen_sum, _ = x.shape
+        seqlen_sum, _ = freqs_cis.shape
 
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-        xq = xq.view(seqlen_sum, self.n_heads, self.args.head_dim)
-        self.k[seqlen_sum] = xk.view(self.n_kv_heads, self.args.head_dim)
-        self.v[seqlen_sum] = xv.view(self.n_kv_heads, self.args.head_dim)
-        xq, xk = apply_rotary_emb_inference(xq, xk, freqs_cis=freqs_cis)
+        xq = xq.view(1, self.n_heads, self.args.head_dim)
+        self.k[seqlen_sum-1] = xk.view(self.n_kv_heads, self.args.head_dim)
+        self.v[seqlen_sum-1] = xv.view(self.n_kv_heads, self.args.head_dim)
+        xq, xk = apply_rotary_emb_inference(xq, self.k[:seqlen_sum], freqs_cis=freqs_cis)
 
-        key, val = xk, xv
+        key, val = xk, self.v[:seqlen_sum]
 
         # Repeat keys and values to match number of query heads
         key, val = repeat_kv(key, val, self.repeats, dim=1)
@@ -136,11 +136,11 @@ class Attention(nn.Module):
         att = (xq @ key.transpose(-2, -1)) * (1.0 / torch.sqrt(torch.tensor(key.size(-1))))
         att = att.masked_fill(self.bias[:,:seqlen_sum,:seqlen_sum] == 0, float('-inf'))
         att = torch.nn.functional.softmax(att, dim=-1)
-        y = att @ val # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        output = y.transpose(1, 2).contiguous().view(1, seqlen_sum, self.args.dim) # re-assemble all head outputs side by side
+        y = att[:,:,-1:] @ val # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        output = y.transpose(1, 2).contiguous().view(1, 1, self.args.dim) # re-assemble all head outputs side by side
 
         # output projection
-        return self.wo(output.view(seqlen_sum, -1))
+        return self.wo(output.view(1, -1))
 
 class FeedForward(nn.Module):
     def __init__(self, args: ModelArgs):
@@ -293,7 +293,7 @@ class Transformer(nn.Module):
         input_ids: torch.Tensor,
         seqlens: List[int],
     ) -> torch.Tensor:
-        assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
+        # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
         h = self.tok_embeddings(input_ids)
         positions = positions_from_sizes(seqlens, self.freqs_cis.device)
@@ -334,7 +334,7 @@ class Transformer(nn.Module):
 
         for _ in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx, seqlens=[idx.shape[0]])
+            logits = self.forward_inference(idx_next, seqlens=[idx.shape[0]])
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[-1, :] / temperature
             # optionally crop the logits to only the top k options
