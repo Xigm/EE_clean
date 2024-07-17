@@ -65,7 +65,7 @@ class Attention(nn.Module):
         self.wo = MaybeLora(args.n_heads * args.head_dim, args.dim, bias=False)
 
         self.register_buffer("bias", torch.tril(torch.ones(args.block_size, args.block_size))
-                                        .view(1, args.block_size, args.block_size))
+                                        .view(1, args.block_size, args.block_size), persistent = False)
 
     def forward(
         self,
@@ -87,15 +87,14 @@ class Attention(nn.Module):
         key, val = repeat_kv(key, val, self.repeats, dim=1)
 
         # xformers requires (B=1, S, H, D)
-        xq, key, val = xq[None, ...], key[None, ...], val[None, ...]
+        xq, key, val = xq[None, ...].transpose(1,2), key[None, ...].transpose(1,2), val[None, ...].transpose(1,2)
 
         # Write the attention function the old fashioned way
-        att = (xq @ key.transpose(-2, -1)) * (1.0 / torch.sqrt(key.size(-1)))
+        att = (xq @ key.transpose(-2, -1)) * (1.0 / torch.sqrt(torch.tensor(key.size(-1))))
         att = att.masked_fill(self.bias[:,:seqlen_sum,:seqlen_sum] == 0, float('-inf'))
-        att = torch.functional.softmax(att, dim=-1)
-        att = self.attn_dropout(att)
+        att = torch.nn.functional.softmax(att, dim=-1)
         y = att @ val # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        output = y.transpose(1, 2).contiguous().view(B, seqlen_sum, C) # re-assemble all head outputs side by side
+        output = y.transpose(1, 2).contiguous().view(1, seqlen_sum, self.args.dim) # re-assemble all head outputs side by side
 
         # output projection
         return self.wo(output.view(seqlen_sum, -1))
@@ -153,9 +152,8 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
-        att_mask: AttentionBias,
     ) -> torch.Tensor:
-        r = self.attention(self.attention_norm(x), freqs_cis, att_mask)
+        r = self.attention(self.attention_norm(x), freqs_cis)
         h = x + r
 
         r = self.feed_forward(self.ffn_norm(h))
@@ -224,12 +222,12 @@ class Transformer(nn.Module):
 
         h = self.tok_embeddings(input_ids)
         positions = positions_from_sizes(seqlens, self.freqs_cis.device)
-        att_mask = BlockDiagonalCausalMask.from_seqlens(seqlens)
+        # att_mask = BlockDiagonalCausalMask.from_seqlens(seqlens)
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
         for layer in self.layers:
-            h = layer(h, freqs_cis, att_mask)
+            h = layer(h, freqs_cis)
 
         return self.output(self.norm(h)).float()
 
@@ -241,22 +239,20 @@ class Transformer(nn.Module):
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
         for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
+            logits = self(idx, seqlens=[idx.shape[0]])
             # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
+            logits = logits[-1, :] / temperature
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
+                logits[logits < v[[-1]]] = -float('Inf')
             # apply softmax to convert logits to (normalized) probabilities
-            probs = torch.functional.softmax(logits, dim=-1)
+            probs = torch.nn.functional.softmax(logits, dim=-1)
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
             # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
+            idx = torch.cat((idx, idx_next))
 
         return idx
 
