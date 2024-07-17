@@ -7,7 +7,7 @@ from models.gpt2.model import GPTConfig
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 from mistral_common.tokens.instruct.request import InstructRequest
 from mistral_common.protocol.instruct.messages import UserMessage
-from models.mistral.model import Transformer, ModelArgs
+from models.mistral.model_EE import Transformer, ModelArgs
 
 import json
 import tiktoken

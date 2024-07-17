@@ -296,21 +296,21 @@ class Transformer(nn.Module):
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
         # COLD start
-        pos = idx.size(1)
-        logits, _= self(idx, seqlens = [pos], load_caches = True) # just to make sure the model is in the right shape
+        pos = idx.shape[0]
+        logits = self(idx, seqlens = [pos], load_caches = True) # just to make sure the model is in the right shape
 
-        logits = logits[:, -1, :] / temperature
+        logits = logits[-1, :] / temperature
         # optionally crop the logits to only the top k options
         if top_k is not None:
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < v[:, [-1]]] = -float('Inf')
+            logits[logits < v[[-1]]] = -float('Inf')
 
         # apply softmax to convert logits to (normalized) probabilities
         probs = torch.nn.functional.softmax(logits, dim=-1)
         # sample from the distribution
         idx_next = torch.multinomial(probs, num_samples=1)
         # append sampled index to the running sequence and continue
-        idx = torch.cat((idx, idx_next), dim=1)
+        idx = torch.cat((idx, idx_next))
 
         pos += 1
 
