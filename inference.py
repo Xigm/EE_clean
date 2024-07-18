@@ -7,13 +7,13 @@ from models.gpt2.model import GPTConfig
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 from mistral_common.tokens.instruct.request import InstructRequest
 from mistral_common.protocol.instruct.messages import UserMessage
-from models.mistral.model_EE import Transformer, ModelArgs
+from models.mistral.model import Transformer, ModelArgs
 
 import json
 import tiktoken
 
 model_choice = "mistral"
-tokens_generated = 100
+tokens_generated = 50
 
 if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
@@ -39,6 +39,6 @@ if model_choice == "mistral":
     decode = lambda l: enc.decode(l.tolist())
 
 with torch.no_grad():
-    output = model.generate(encode("Nvidia is a very famous company which produces"),temperature=1e-5, max_new_tokens=tokens_generated, top_k = 20)
+    output = model.generate(encode("Nvidia is a great company because"), temperature=1, max_new_tokens=tokens_generated, top_k = 10)
 
 print(decode(output))

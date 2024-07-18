@@ -104,10 +104,10 @@ class Attention(nn.Module):
         att = att.masked_fill(self.bias[:,:seqlen_sum,:seqlen_sum] == 0, float('-inf'))
         att = torch.nn.functional.softmax(att, dim=-1)
         y = att @ val # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        output = y.transpose(1, 2).contiguous().view(1, seqlen_sum, self.args.dim) # re-assemble all head outputs side by side
+        output = y.transpose(1, 2).contiguous().view(seqlen_sum, self.args.dim) # re-assemble all head outputs side by side
 
         # output projection
-        return self.wo(output.view(seqlen_sum, -1))
+        return self.wo(output)
     
     def forward_inference(
         self,
@@ -360,6 +360,12 @@ class Transformer(nn.Module):
             sd_hf[k] = v.to(dtype)
 
         self.load_state_dict(sd_hf)
+
+
+    def freeze_backbone(self):
+        for name, param in self.named_modules():
+            if 'ee' not in name:
+                param.requires_grad = False
 
 def positions_from_sizes(sizes: Iterable[int], device):
     return torch.tensor(

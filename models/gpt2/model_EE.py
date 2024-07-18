@@ -451,3 +451,8 @@ class GPT(nn.Module):
             pos += 1
 
         return idx
+    
+    def freeze_backbone(self):
+        for name, param in self.named_modules():
+            if 'ee' not in name:
+                param.requires_grad = False
