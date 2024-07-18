@@ -71,16 +71,12 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        if self.flash:
-            # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
-        else:
-            # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        # manual implementation of attention
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
@@ -135,10 +131,21 @@ class EE(nn.Module):
         def __init__(self, config):
             super().__init__()
             self.c_fc = nn.Linear(config.n_embd, 2, bias=config.bias)
+            # self.c_proj = nn.Linear(516, 2, bias=config.bias)
             
         def forward(self, x):
             x = self.c_fc(x)
+            # x = self.c_proj(x)
             return x
+
+        # def __init__(self, config):
+        #     super().__init__()
+        #     # h.size = config.n_embd
+        #     self.lstm = nn.LSTM(config.n_embd, config.n_embd, 2, bias = True, batch_first = True, bidirectional = False, proj_size = 2)
+            
+        # def forward(self, x):
+        #     x = self.lstm(x)
+        #     return x[0]
 
 class Block(nn.Module):
 
@@ -241,14 +248,16 @@ class GPT(nn.Module):
         x = self.transformer.drop(tok_emb + pos_emb)
         self.intermediate_x[0, 0, :t] = x.detach()
         if train_EE:
+            k = 10
             exits = torch.zeros((b, self.config.block_size, self.config.n_layer, 2), device = device)
-            early_exits = torch.zeros((b, self.config.block_size, self.config.n_layer, self.config.vocab_size), device = device)
+            early_exits_topk = torch.zeros((b, self.config.block_size, self.config.n_layer, k), device = device)
         for i, block in enumerate(self.transformer.h):
             
             if train_EE:
                 x, ee = block(x, load_caches = load_caches)
-                exits[:, :, i] = ee
-                early_exits[:, :, i] = self.lm_head(self.transformer.ln_f(x.detach()))
+                shape_ee = ee.shape
+                exits[:shape_ee[0], :shape_ee[1], i] = ee
+                early_exits_topk[:shape_ee[0], :shape_ee[1], i] = torch.topk(self.lm_head(self.transformer.ln_f(x.detach())), k, dim = 2)[1]
             else:
                 x, _ = block(x, load_caches = load_caches)
 
@@ -263,13 +272,68 @@ class GPT(nn.Module):
             loss = F.cross_entropy(x.view(-1, x.size(-1)), targets.view(-1), ignore_index=-1)
 
         elif train_EE:
-            targets = torch.argmax(logits.detach().view(b, self.config.block_size, 1, self.config.vocab_size).repeat((1, 1, self.config.n_layer, 1)))
-            # diff = torch.nn.functional.cosine_similarity(early_exits.cpu(), targets.cpu(), dim=3, eps=1e-8)
-            diff = targets == torch.argmax(early_exits, dim = 3)
-            weighted_loss = torch.arange(self.config.n_layers).repeat((b, 1))
-            # diff = (diff * weighted_loss).mean(1)
-            loss = F.cross_entropy(ee.view(-1), diff.view(-1), ignore_index=-1)
+            targets_EE = torch.argmax(logits.detach(), dim = 2).view(b, shape_ee[1], 1).repeat(1,1, self.config.n_layer)
+            
+            # diff = (targets_EE == torch.argmax(early_exits_topk[:, :shape_ee[1], :], dim = 3)).to(torch.long)
 
+            diff = (targets_EE.unsqueeze(3).repeat(1,1,1,k) == early_exits_topk[:, :shape_ee[1], :]).any(3).to(torch.long)
+
+            ratio = torch.sum(diff)/torch.prod(torch.tensor(diff.shape))
+
+            # single loss
+            loss = F.cross_entropy(
+                                    exits[:shape_ee[0],:shape_ee[1]].view(shape_ee[0] * shape_ee[1] * self.config.n_layer, 2),
+                                    diff.view(-1)
+                                    )
+            
+            if loss is torch.nan:
+                print("sadge")
+            
+            
+            # sum of losses
+            # weighted_loss = torch.arange(self.config.n_layer)/self.config.n_layer
+            # loss = 0
+            # for i in range(self.config.n_layer):
+            #     loss += weighted_loss[i] * F.cross_entropy(
+            #                         exits[:shape_ee[0], :shape_ee[1], i].view(shape_ee[0] * shape_ee[1], 2),
+            #                         diff[:, :, i].view(-1)
+            #                         )
+                # loss /= torch.sum(weighted_loss)
+            
+            # clas weighted single loss
+            # loss = F.cross_entropy(
+            #                     exits[:shape_ee[0],:shape_ee[1]].view(shape_ee[0] * shape_ee[1] * self.config.n_layer, 2),
+            #                     diff.view(-1),
+            #                     weight = torch.tensor([ratio, 1 - ratio], device = device, dtype = torch.float)
+            #                     )
+
+            # compute accuracy between diff and exits
+            acc = (diff == torch.argmax(exits[:shape_ee[0],:shape_ee[1]], dim = 3)).to(torch.float).mean()
+            
+            predicted_labels = torch.argmax(exits[:shape_ee[0], :shape_ee[1]], dim=3)
+
+            true_labels = diff.view(-1)
+            predicted_labels = predicted_labels.view(-1)
+
+            # True Positives
+            TP = ((true_labels == 1) & (predicted_labels == 1)).sum().item()
+
+            # False Positives
+            FP = ((true_labels == 0) & (predicted_labels == 1)).sum().item()
+
+            # False Negatives
+            FN = ((true_labels == 1) & (predicted_labels == 0)).sum().item()
+
+
+            precision = TP / (TP + FP) if (TP + FP) > 0 else 0
+            recall = TP / (TP + FN) if (TP + FN) > 0 else 0
+
+            f1 = 2 * (precision * recall) / (precision + recall)
+
+            metrics = torch.tensor([acc.item(), recall, precision, f1, ratio])
+
+            return logits, loss, metrics           
+            
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             # logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
@@ -453,6 +517,6 @@ class GPT(nn.Module):
         return idx
     
     def freeze_backbone(self):
-        for name, param in self.named_modules():
+        for name, param in self.named_parameters():
             if 'ee' not in name:
                 param.requires_grad = False

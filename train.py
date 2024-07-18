@@ -8,10 +8,13 @@ from models.gpt2.model import GPTConfig
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 from mistral_common.tokens.instruct.request import InstructRequest
 from mistral_common.protocol.instruct.messages import UserMessage
-from models.mistral.model import Transformer, ModelArgs
+from models.mistral.model_EE import Transformer, ModelArgs
 
 import json
 import tiktoken
+
+from schedulefree import AdamWScheduleFree
+
 # use name="sample-10BT" to use the 10BT sample
 fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
 
@@ -21,6 +24,7 @@ if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
     model = GPT(GPTConfig)
     model.from_pretrained("gpt2")
+    model.to("cuda")
     
 elif model_choice == "mistral":
     path = "./weights/mistral/7b-v0.3"
@@ -32,7 +36,7 @@ elif model_choice == "mistral":
 
 if model_choice == "gpt2":
     enc = tiktoken.get_encoding("gpt2")
-    encode = lambda s: torch.tensor(enc.encode(s, allowed_special={"<|endoftext|>"}))[None, :]
+    encode = lambda s: torch.tensor(enc.encode(s, allowed_special={"<|endoftext|>"}), device = "cuda")[None, :]
     decode = lambda l: enc.decode(l[0,:].tolist())
 if model_choice == "mistral":
     enc = MistralTokenizer.v3().instruct_tokenizer
@@ -46,26 +50,99 @@ model.freeze_backbone()
 batch_size = 1
 generated_tokens = 50
 
+fw.shuffle()
+
 # check some samples
+# max_iters = 1
 # for i, ex in enumerate(fw):
-#     if i == 3:
-#         break
-#     print("////// Input:")
-#     print(ex["text"])
 
 #     e = encode(ex["text"])
 
 #     if e.size(1) > 1024 - generated_tokens:
 #         print("Skipping long input")
+#         max_iters += 1
 #         continue
+
+#     if i == max_iters:
+#         break
+
+#     print("////// Input:")
+#     print(ex["text"])
 
 #     with torch.no_grad():
 #         output = model.generate(e, temperature=1, max_new_tokens=generated_tokens, top_k = 10)
 
 #     print("////// Output:")
-#     print(decode(output[:0, -generated_tokens:]))
+#     print(decode(output[:1, -generated_tokens:]))
 #     print("\n\n")
 
-fw.shuffle()
+val_freq = 10
+
+optimizer = AdamWScheduleFree(model.parameters(), lr=5e-4)
+
+iters = 300
+metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
+
+# create training loop
+for i, ex in enumerate(fw):
+
+    if iters == i:
+        break
+
+    # if i == 0:
+    e = encode(ex["text"])
+
+    # crop long inputs
+    if e.size(1) > 1024:
+        e = e[:, :1024]
+
+    if i % val_freq == 0:
+        with torch.no_grad():
+            _, loss_val, metrics_val[int(i/val_freq)] = model(e, train_EE = True)
+        print(f"Validation loss: {loss_val.item():.4f}")
+
+    else:
+        _, loss, metrics[i - int(i/val_freq) - 1] = model(e, train_EE = True)
+
+        loss.backward()
+
+        optimizer.step()
+
+        optimizer.zero_grad()
+
+        print(f"Training loss: {loss.item():.4f}")
+
+
+import matplotlib.pyplot as plt
+
+# generate x axis for val and train
+x_train = torch.arange(0, iters, 1)
+x_val = x_train[::val_freq]
+x_train = [p.item() for p in x_train if p not in x_val]
+
+print("Mean ratio is:", metrics[:,-1].mean().item())
+
+# make a subplot with 4 graphs
+fig, axs = plt.subplots(2, 2)
+fig.suptitle('Training and Validation Metrics')
+axs[0, 0].plot(x_train, metrics[:,0].numpy(), label="Training")
+axs[0, 0].plot(x_val, metrics_val[:,0].numpy(), label="Validation")
+axs[0, 0].plot(x_train, metrics[:,-1].numpy(), '--', label="Ratio")
+axs[0, 0].set_title('EE Accuracy')
+axs[0, 0].legend()
+axs[0, 1].plot(x_train, metrics[:,1].numpy(), label="Training")
+axs[0, 1].plot(x_val, metrics_val[:,1].numpy(), label="Validation")
+axs[0, 1].legend()
+axs[0, 1].set_title('EE Recall')
+axs[1, 0].plot(x_train, metrics[:,2].numpy(), label="Training")
+axs[1, 0].plot(x_val, metrics_val[:,2].numpy(), label="Validation")
+axs[1, 0].set_title('EE Precision')
+axs[1, 0].legend()
+axs[1, 1].plot(x_train, metrics[:,3].numpy(), label="Training")
+axs[1, 1].plot(x_val, metrics_val[:,3].numpy(), label="Validation")
+axs[1, 1].legend()
+axs[1, 1].set_title('EE F1')
+
+plt.show()
 
 
