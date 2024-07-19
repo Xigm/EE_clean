@@ -288,10 +288,11 @@ class Transformer(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        seqlens: List[int],
         load_caches = False,
         train_EE = False,
     ) -> torch.Tensor:
+        
+        seqlens = [input_ids.shape[0]]
         # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
         h = self.tok_embeddings(input_ids)

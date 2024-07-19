@@ -18,7 +18,7 @@ from schedulefree import AdamWScheduleFree
 # use name="sample-10BT" to use the 10BT sample
 fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
 
-model_choice = "mistral"
+model_choice = "gpt2"
 
 if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
@@ -84,8 +84,9 @@ for i, ex in enumerate(fw):
         # e = encode("bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang")
 
     # crop long inputs
-    if e.size(1) > 1024*4:
-        e = e[:, :1024]
+    if model_choice == "gpt2":
+        if e.size(1) > 1024:
+            e = e[:, :1024]
 
     if i % val_freq == 0:
         with torch.no_grad():
