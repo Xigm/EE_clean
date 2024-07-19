@@ -173,7 +173,7 @@ class EE(nn.Module):
         # Linear version of EE
         def __init__(self, args):
             super().__init__()
-            self.c_fc = nn.Linear(args.dim, 2, bias=args.bias)
+            self.c_fc = nn.Linear(args.dim, 2, bias=True)
             # self.c_proj = nn.Linear(config.n_embd * 2, 2, bias=config.bias)
             
         def forward(self, x):
@@ -463,12 +463,11 @@ class Transformer(nn.Module):
         for k, v in sd_hf.items():
             sd_hf[k] = v.to(dtype)
 
-        self.load_state_dict(sd_hf)
-
+        self.load_state_dict(sd_hf, strict = False)
 
     def freeze_backbone(self):
-        for name, param in self.named_modules():
-            if 'ee' not in name:
+        for name, param in self.named_parameters():
+            if 'ee' not in name or 'feed' in name:
                 param.requires_grad = False
 
 def positions_from_sizes(sizes: Iterable[int], device):

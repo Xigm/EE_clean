@@ -18,13 +18,14 @@ from schedulefree import AdamWScheduleFree
 # use name="sample-10BT" to use the 10BT sample
 fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
 
-model_choice = "gpt2"
+model_choice = "mistral"
 
 if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
     model = GPT(GPTConfig)
     model.from_pretrained("gpt2")
     model.to("cuda")
+    n_layer = model.config.n_layer
     
 elif model_choice == "mistral":
     path = "./weights/mistral/7b-v0.3"
@@ -33,6 +34,7 @@ elif model_choice == "mistral":
         args.lora.enable = False
         model = Transformer(args).to(torch.bfloat16).to("cuda")
     model.from_pretrained(path + "/consolidated.safetensors")
+    n_layer = model.args.n_layers
 
 if model_choice == "gpt2":
     enc = tiktoken.get_encoding("gpt2")
@@ -61,8 +63,11 @@ print(" EEs are a", round(100*trainable/total, 3), "% of the GPT2 model")
 val_freq = 10
 
 optimizers = []
-for i in range(model.config.n_layer):
-    optimizers.append(AdamWScheduleFree(model.transformer.h[i].ee.parameters(), lr=0.05))
+for i in range(n_layer):
+    if model_choice == "gpt2":
+        optimizers.append(AdamWScheduleFree(model.transformer.h[i].ee.parameters(), lr=0.005))
+    if model_choice == "mistral":
+        optimizers.append(AdamWScheduleFree(model.layers[i].ee.parameters(), lr=0.005))
 
 iters = 50
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
@@ -79,7 +84,7 @@ for i, ex in enumerate(fw):
         # e = encode("bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang")
 
     # crop long inputs
-    if e.size(1) > 1024:
+    if e.size(1) > 1024*4:
         e = e[:, :1024]
 
     if i % val_freq == 0:
