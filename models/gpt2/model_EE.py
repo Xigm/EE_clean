@@ -131,8 +131,8 @@ class EE(nn.Module):
         # Linear version of EE
         def __init__(self, config):
             super().__init__()
-            self.c_fc = nn.Linear(config.n_embd, config.n_embd * 2, bias=config.bias)
-            self.c_proj = nn.Linear(config.n_embd * 2, 2, bias=config.bias)
+            self.c_fc = nn.Linear(config.n_embd, 2, bias=config.bias)
+            # self.c_proj = nn.Linear(config.n_embd * 2, 2, bias=config.bias)
             
         def forward(self, x):
             x = self.c_fc(x)

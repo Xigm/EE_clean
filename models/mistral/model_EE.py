@@ -168,7 +168,19 @@ class RMSNorm(torch.nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
-
+class EE(nn.Module):
+        
+        # Linear version of EE
+        def __init__(self, args):
+            super().__init__()
+            self.c_fc = nn.Linear(args.dim, 2, bias=args.bias)
+            # self.c_proj = nn.Linear(config.n_embd * 2, 2, bias=config.bias)
+            
+        def forward(self, x):
+            x = self.c_fc(x)
+            # x = self.c_proj(x)
+            return x
+        
 class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
@@ -190,6 +202,8 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
         self.args = args
 
+        self.ee = EE(args)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -202,7 +216,9 @@ class TransformerBlock(nn.Module):
         r = self.feed_forward(self.ffn_norm(h))
         out = h + r
 
-        return out
+        ee = self.ee(out)
+
+        return out, ee
     
     def forward_inference(
         self,
@@ -274,8 +290,9 @@ class Transformer(nn.Module):
         input_ids: torch.Tensor,
         seqlens: List[int],
         load_caches = False,
+        train_EE = False,
     ) -> torch.Tensor:
-        assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
+        # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
         h = self.tok_embeddings(input_ids)
         positions = positions_from_sizes(seqlens, self.freqs_cis.device)
@@ -283,10 +300,97 @@ class Transformer(nn.Module):
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
-        for layer in self.layers:
-            h = layer(h, freqs_cis, load_caches)
+        if train_EE:
+            k = 5
+            exits = torch.zeros((1, self.args.block_size, self.args.n_layer, 2), device = input_ids.device)
+            early_exits_topk = torch.zeros((1, self.args.block_size, self.args.n_layer, k), device = input_ids.device)
+       
+        for i,layer in enumerate(self.layers):
 
-        return self.output(self.norm(h)).float()
+            if train_EE:
+                h, ee = layer(h, freqs_cis, load_caches)
+                shape_ee = ee.shape
+                exits[:shape_ee[0], :shape_ee[1], i] = ee
+                early_exits_topk[:shape_ee[0], :shape_ee[1], i] = torch.topk(self.lm_head(self.transformer.ln_f(x.detach())), k, dim = 2)[1]
+            
+            else:
+                h = layer(h, freqs_cis, load_caches)
+
+        logits = self.output(self.norm(h)).float()
+
+        if train_EE:
+            
+            targets_EE = torch.argmax(logits.detach(), dim = 2).view(1, shape_ee[1], 1).repeat(1,1, self.config.n_layer)
+            
+            # diff = (targets_EE == torch.argmax(early_exits_topk[:, :shape_ee[1], :], dim = 3)).to(torch.long)
+
+            diff = (targets_EE.unsqueeze(3).repeat(1,1,1,k) == early_exits_topk[:, :shape_ee[1], :]).any(3).to(torch.long)
+
+            ratio = torch.sum(diff)/torch.prod(torch.tensor(diff.shape))
+
+            # single loss
+            # loss = F.cross_entropy(
+            #                         exits[:shape_ee[0],:shape_ee[1]].view(shape_ee[0] * shape_ee[1] * self.config.n_layer, 2),
+            #                         diff.view(-1)
+            #                         )
+            
+            
+            # if loss is torch.nan:
+            #     print("sadge")
+            
+            
+            # sum of losses
+            weighted_loss = torch.ones(self.args.n_layer)/self.args.n_layer
+            loss = 0
+            losses = []
+            for i in range(self.config.n_layer):
+                loss_p = weighted_loss[i] * torch.nn.functional.cross_entropy(
+                                    exits[:shape_ee[0], :shape_ee[1], i].view(shape_ee[0] * shape_ee[1], 2),
+                                    diff[:, :, i].view(-1)
+                                    )
+                losses.append(loss_p)
+                # loss += loss_p
+
+            # print(losses)
+            
+            # clas weighted single loss
+            # loss = F.cross_entropy(
+            #                     exits[:shape_ee[0],:shape_ee[1]].view(shape_ee[0] * shape_ee[1] * self.config.n_layer, 2),
+            #                     diff.view(-1),
+            #                     weight = torch.tensor([ratio, 1 - ratio], device = device, dtype = torch.float)
+            #                     )
+            
+
+            # compute accuracy between diff and exits
+            acc = (diff == torch.argmax(exits[:shape_ee[0],:shape_ee[1]], dim = 3)).to(torch.float).mean()
+            
+            predicted_labels = torch.argmax(exits[:shape_ee[0], :shape_ee[1]], dim=3)
+
+            true_labels = diff.view(-1)
+            predicted_labels = predicted_labels.view(-1)
+
+            # True Positives
+            TP = ((true_labels == 1) & (predicted_labels == 1)).sum().item()
+
+            # False Positives
+            FP = ((true_labels == 0) & (predicted_labels == 1)).sum().item()
+
+            # False Negatives
+            FN = ((true_labels == 1) & (predicted_labels == 0)).sum().item()
+
+
+            precision = TP / (TP + FP) if (TP + FP) > 0 else 0
+            recall = TP / (TP + FN) if (TP + FN) > 0 else 0
+
+            f1 = 2 * (precision * recall) / (precision + recall)
+
+            metrics = torch.tensor([acc.item(), recall, precision, f1, ratio])
+
+            return logits, losses, metrics  
+
+        else:
+                   
+            return logits, None, None
     
     def forward_inference(
         self,

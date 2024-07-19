@@ -52,43 +52,19 @@ generated_tokens = 50
 
 fw = fw.shuffle()
 
-# check some samples
-# max_iters = 1
-# for i, ex in enumerate(fw):
-
-#     e = encode(ex["text"])
-
-#     if e.size(1) > 1024 - generated_tokens:
-#         print("Skipping long input")
-#         max_iters += 1
-#         continue
-
-#     if i == max_iters:
-#         break
-
-#     print("////// Input:")
-#     print(ex["text"])
-
-#     with torch.no_grad():
-#         output = model.generate(e, temperature=1, max_new_tokens=generated_tokens, top_k = 10)
-
-#     print("////// Output:")
-#     print(decode(output[:1, -generated_tokens:]))
-#     print("\n\n")
-
 # check number of trainble params
 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print("Trainable parameters", trainable)
-print(" It's a", round(100*trainable/total, 3), "% of the GPT2 model")
+print(" EEs are a", round(100*trainable/total, 3), "% of the GPT2 model")
 
 val_freq = 10
 
 optimizers = []
 for i in range(model.config.n_layer):
-    optimizers.append(AdamWScheduleFree(model.transformer.h[i].ee.parameters(), lr=0.0005))
+    optimizers.append(AdamWScheduleFree(model.transformer.h[i].ee.parameters(), lr=0.05))
 
-iters = 500
+iters = 50
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
 
 
