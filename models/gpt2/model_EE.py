@@ -128,24 +128,29 @@ class MLP(nn.Module):
     
 class EE(nn.Module):
         
+        # Linear version of EE
         def __init__(self, config):
             super().__init__()
-            self.c_fc = nn.Linear(config.n_embd, 2, bias=config.bias)
-            # self.c_proj = nn.Linear(516, 2, bias=config.bias)
+            self.c_fc = nn.Linear(config.n_embd, config.n_embd * 2, bias=config.bias)
+            self.c_proj = nn.Linear(config.n_embd * 2, 2, bias=config.bias)
             
         def forward(self, x):
             x = self.c_fc(x)
             # x = self.c_proj(x)
             return x
 
+        # RNN version of EE
         # def __init__(self, config):
         #     super().__init__()
         #     # h.size = config.n_embd
-        #     self.lstm = nn.LSTM(config.n_embd, config.n_embd, 2, bias = True, batch_first = True, bidirectional = False, proj_size = 2)
+        #     self.middle = 50
+        #     self.lstm = nn.LSTM(config.n_embd, self.middle, 1, bias = True, batch_first = True, bidirectional = False)
+        #     self.fc = nn.Linear(config.n_embd + self.middle, 2, bias = True)
             
-        # def forward(self, x):
-        #     x = self.lstm(x)
-        #     return x[0]
+        # def forward(self, x_in):
+        #     x = self.lstm(x_in)
+        #     x = self.fc(torch.cat((x[0],x_in), dim = 2))
+        #     return x
 
 class Block(nn.Module):
 
@@ -157,13 +162,13 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
         self.ee = EE(config)
-        self.softmax = nn.Softmax(dim = 1)
+        # self.softmax = nn.Softmax(dim = 1)
 
     def forward(self, x, load_caches = False):
         x = x + self.attn(self.ln_1(x), load_caches = load_caches)
         x = x + self.mlp(self.ln_2(x))
         ee = self.ee(x)
-        ee = self.softmax(ee)
+        # ee = self.softmax(ee)
         return x, ee
     
     def forward_inference(self, x, pos = None):
@@ -248,7 +253,7 @@ class GPT(nn.Module):
         x = self.transformer.drop(tok_emb + pos_emb)
         self.intermediate_x[0, 0, :t] = x.detach()
         if train_EE:
-            k = 10
+            k = 5
             exits = torch.zeros((b, self.config.block_size, self.config.n_layer, 2), device = device)
             early_exits_topk = torch.zeros((b, self.config.block_size, self.config.n_layer, k), device = device)
         for i, block in enumerate(self.transformer.h):
@@ -281,24 +286,29 @@ class GPT(nn.Module):
             ratio = torch.sum(diff)/torch.prod(torch.tensor(diff.shape))
 
             # single loss
-            loss = F.cross_entropy(
-                                    exits[:shape_ee[0],:shape_ee[1]].view(shape_ee[0] * shape_ee[1] * self.config.n_layer, 2),
-                                    diff.view(-1)
-                                    )
+            # loss = F.cross_entropy(
+            #                         exits[:shape_ee[0],:shape_ee[1]].view(shape_ee[0] * shape_ee[1] * self.config.n_layer, 2),
+            #                         diff.view(-1)
+            #                         )
             
-            if loss is torch.nan:
-                print("sadge")
+            
+            # if loss is torch.nan:
+            #     print("sadge")
             
             
             # sum of losses
-            # weighted_loss = torch.arange(self.config.n_layer)/self.config.n_layer
-            # loss = 0
-            # for i in range(self.config.n_layer):
-            #     loss += weighted_loss[i] * F.cross_entropy(
-            #                         exits[:shape_ee[0], :shape_ee[1], i].view(shape_ee[0] * shape_ee[1], 2),
-            #                         diff[:, :, i].view(-1)
-            #                         )
-                # loss /= torch.sum(weighted_loss)
+            weighted_loss = torch.ones(self.config.n_layer)/self.config.n_layer
+            loss = 0
+            losses = []
+            for i in range(self.config.n_layer):
+                loss_p = weighted_loss[i] * F.cross_entropy(
+                                    exits[:shape_ee[0], :shape_ee[1], i].view(shape_ee[0] * shape_ee[1], 2),
+                                    diff[:, :, i].view(-1)
+                                    )
+                losses.append(loss_p)
+                # loss += loss_p
+
+            # print(losses)
             
             # clas weighted single loss
             # loss = F.cross_entropy(
@@ -306,6 +316,7 @@ class GPT(nn.Module):
             #                     diff.view(-1),
             #                     weight = torch.tensor([ratio, 1 - ratio], device = device, dtype = torch.float)
             #                     )
+            
 
             # compute accuracy between diff and exits
             acc = (diff == torch.argmax(exits[:shape_ee[0],:shape_ee[1]], dim = 3)).to(torch.float).mean()
@@ -332,7 +343,7 @@ class GPT(nn.Module):
 
             metrics = torch.tensor([acc.item(), recall, precision, f1, ratio])
 
-            return logits, loss, metrics           
+            return logits, losses, metrics           
             
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position

@@ -50,7 +50,7 @@ model.freeze_backbone()
 batch_size = 1
 generated_tokens = 50
 
-fw.shuffle()
+fw = fw.shuffle()
 
 # check some samples
 # max_iters = 1
@@ -76,12 +76,21 @@ fw.shuffle()
 #     print(decode(output[:1, -generated_tokens:]))
 #     print("\n\n")
 
+# check number of trainble params
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print("Trainable parameters", trainable)
+print(" It's a", round(100*trainable/total, 3), "% of the GPT2 model")
+
 val_freq = 10
 
-optimizer = AdamWScheduleFree(model.parameters(), lr=5e-4)
+optimizers = []
+for i in range(model.config.n_layer):
+    optimizers.append(AdamWScheduleFree(model.transformer.h[i].ee.parameters(), lr=0.0005))
 
-iters = 300
+iters = 500
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
+
 
 # create training loop
 for i, ex in enumerate(fw):
@@ -91,6 +100,7 @@ for i, ex in enumerate(fw):
 
     # if i == 0:
     e = encode(ex["text"])
+        # e = encode("bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang bang")
 
     # crop long inputs
     if e.size(1) > 1024:
@@ -99,18 +109,48 @@ for i, ex in enumerate(fw):
     if i % val_freq == 0:
         with torch.no_grad():
             _, loss_val, metrics_val[int(i/val_freq)] = model(e, train_EE = True)
-        print(f"Validation loss: {loss_val.item():.4f}")
+        print(f"Validation loss: {loss_val[0].item():.4f}")
 
     else:
+
         _, loss, metrics[i - int(i/val_freq) - 1] = model(e, train_EE = True)
 
-        loss.backward()
+        for i, optimizer in enumerate(optimizers):
 
-        optimizer.step()
+            loss[i].backward(retain_graph=True)
 
-        optimizer.zero_grad()
+            optimizers[i].step()
 
-        print(f"Training loss: {loss.item():.4f}")
+            optimizers[i].zero_grad()
+        
+        # losses = [l.item() for l in loss]
+        # print(f"Training loss: {losses}")
+
+        # print(f"Training loss: {loss.item():.4f}")
+
+# test run
+test_iters = 10
+metrics_test = torch.zeros((test_iters, 5))
+print("Running test...")
+for i, ex in enumerate(fw):
+
+    if i == test_iters:
+        break
+
+    e = encode(ex["text"])
+
+    # crop long inputs
+    if e.size(1) > 1024:
+        e = e[:, :1024]
+
+    with torch.no_grad():
+        _, _, metrics_test[i,:] = model(e, train_EE = True)
+
+print("Test metrics:")
+print("Test Accuracy:", metrics_test[:,0].mean().item())
+print("Test Recall:", metrics_test[:,1].mean().item())
+print("Test Precision:", metrics_test[:,2].mean().item())
+print("Test F1:", metrics_test[:,3].mean().item())
 
 
 import matplotlib.pyplot as plt
