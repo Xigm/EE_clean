@@ -171,10 +171,15 @@ class Block(nn.Module):
         # ee = self.softmax(ee)
         return x, ee
     
-    def forward_inference(self, x, pos = None):
+    def forward_inference(self, x, pos = None, use_EE = False):
         x = x + self.attn.forward_inference(self.ln_1(x), pos = pos)
         x = x + self.mlp(self.ln_2(x))
-        return x
+
+        if use_EE:
+            ee = self.ee(x)
+            return x, ee
+        else:
+            return x, None
 
 @dataclass
 class GPTConfig:
@@ -221,6 +226,11 @@ class GPT(nn.Module):
 
         self.intermediate_x = torch.zeros((1, 13, 1024, 768), device = 'cuda')
 
+        # default to 1.0 for all layers
+        self.th = torch.ones(config.n_layer - 1, device = 'cuda')
+
+        self.k = 1
+
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.
@@ -253,12 +263,12 @@ class GPT(nn.Module):
         x = self.transformer.drop(tok_emb + pos_emb)
         self.intermediate_x[0, 0, :t] = x.detach()
         if train_EE:
-            k = 5
-            exits = torch.zeros((b, self.config.block_size, self.config.n_layer, 2), device = device)
-            early_exits_topk = torch.zeros((b, self.config.block_size, self.config.n_layer, k), device = device)
+            k = self.k
+            exits = torch.zeros((b, self.config.block_size, self.config.n_layer - 1, 2), device = device)
+            early_exits_topk = torch.zeros((b, self.config.block_size, self.config.n_layer - 1, k), device = device)
         for i, block in enumerate(self.transformer.h):
             
-            if train_EE:
+            if train_EE and i != self.config.n_layer - 1:
                 x, ee = block(x, load_caches = load_caches)
                 shape_ee = ee.shape
                 exits[:shape_ee[0], :shape_ee[1], i] = ee
@@ -277,7 +287,7 @@ class GPT(nn.Module):
             loss = F.cross_entropy(x.view(-1, x.size(-1)), targets.view(-1), ignore_index=-1)
 
         elif train_EE:
-            targets_EE = torch.argmax(logits.detach(), dim = 2).view(b, shape_ee[1], 1).repeat(1,1, self.config.n_layer)
+            targets_EE = torch.argmax(logits.detach(), dim = 2).view(b, shape_ee[1], 1).repeat(1,1, self.config.n_layer - 1)
             
             # diff = (targets_EE == torch.argmax(early_exits_topk[:, :shape_ee[1], :], dim = 3)).to(torch.long)
 
@@ -297,10 +307,10 @@ class GPT(nn.Module):
             
             
             # sum of losses
-            weighted_loss = torch.ones(self.config.n_layer)/self.config.n_layer
+            weighted_loss = torch.ones(self.config.n_layer - 1)/(self.config.n_layer - 1)
             loss = 0
             losses = []
-            for i in range(self.config.n_layer):
+            for i in range(self.config.n_layer - 1):
                 loss_p = weighted_loss[i] * F.cross_entropy(
                                     exits[:shape_ee[0], :shape_ee[1], i].view(shape_ee[0] * shape_ee[1], 2),
                                     diff[:, :, i].view(-1)
@@ -352,15 +362,41 @@ class GPT(nn.Module):
 
         return logits, loss
     
-    def forward_inference(self, idx, pos=None):
+    def forward_inference(self, idx, pos=None, use_EE = False):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(torch.tensor(pos, device = idx.device)) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         self.intermediate_x[0, 0, pos] = x.detach()
+
         for i, block in enumerate(self.transformer.h):
-            x = block.forward_inference(x, pos)
+            x, ee = block.forward_inference(x, pos, use_EE = use_EE)
+
+            if use_EE:
+
+                ee = F.softmax(ee[0, 0], dim = 0)
+                ind = torch.argmax(ee)
+
+                if ind == 1 and i < self.config.n_layer - 1:
+
+                    if ee[ind] > self.th[i]:
+                        print("Early exit at layer:", i + 1, " position:", pos)
+                        # propagate intermediate states
+
+                        for j in range(i+1, self.config.n_layer):
+
+                            _, k, v  = self.transformer.h[j].attn.c_attn(x).split(self.config.n_embd, dim=2)
+
+                            # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
+                            # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
+
+                            self.transformer.h[j].attn.k[:,pos] = k
+                            self.transformer.h[j].attn.v[:,pos] = v
+
+
+                        break
+
             self.intermediate_x[0, i+1, pos] = x.detach()
 
         x = self.transformer.ln_f(x)
@@ -438,6 +474,11 @@ class GPT(nn.Module):
                 with torch.no_grad():
                     sd[k].copy_(sd_hf[k])
 
+    def from_file_EE(self, path):
+
+        for i in range(self.config.n_layer - 1):
+            self.transformer.h[i].ee.load_state_dict(torch.load(path))
+
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
@@ -481,7 +522,7 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -509,7 +550,7 @@ class GPT(nn.Module):
         for _ in range(max_new_tokens):
             
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx_next, pos = pos)
+            logits = self.forward_inference(idx_next, pos = pos, use_EE = use_EE)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # optionally crop the logits to only the top k options

@@ -13,6 +13,8 @@ from models.mistral.model_EE import Transformer, ModelArgs
 import json
 import tiktoken
 
+import os
+
 from schedulefree import AdamWScheduleFree
 
 # use name="sample-10BT" to use the 10BT sample
@@ -63,13 +65,14 @@ print(" EEs are a", round(100*trainable/total, 3), "% of the GPT2 model")
 val_freq = 10
 
 optimizers = []
-for i in range(n_layer):
+for i in range(n_layer - 1):
     if model_choice == "gpt2":
         optimizers.append(AdamWScheduleFree(model.transformer.h[i].ee.parameters(), lr=0.005))
     if model_choice == "mistral":
         optimizers.append(AdamWScheduleFree(model.layers[i].ee.parameters(), lr=0.005))
 
-iters = 50
+iters = 100
+model.k = 1
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
 
 
@@ -167,4 +170,18 @@ axs[1, 1].set_title('EE F1')
 
 plt.show()
 
+
+# save EE weights
+if model_choice == "gpt2":
+    i = -1
+    for n,m in model.transformer.h[0].ee.named_modules():
+        i += 1
+    name = f"EE_{i}_layers_middle_{model.transformer.h[0].ee.c_fc.weight.size(0)}"
+
+    # create folder with name
+    if not os.path.exists(f"./weights/gpt2/{name}"):
+        os.makedirs(f"./weights/gpt2/{name}")
+
+    for i in range(n_layer - 1):
+        torch.save(model.transformer.h[i].ee.state_dict(), f"./weights/gpt2/{name}/layer_{i}_EE")
 
