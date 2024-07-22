@@ -20,7 +20,7 @@ from schedulefree import AdamWScheduleFree
 # use name="sample-10BT" to use the 10BT sample
 fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
 
-model_choice = "gpt2"
+model_choice = "mistral"
 
 if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
@@ -52,7 +52,6 @@ if model_choice == "mistral":
 model.freeze_backbone()
 
 batch_size = 1
-generated_tokens = 50
 
 fw = fw.shuffle()
 
@@ -60,7 +59,7 @@ fw = fw.shuffle()
 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print("Trainable parameters", trainable)
-print(" EEs are a", round(100*trainable/total, 3), "% of the GPT2 model")
+print(" EEs are a", round(100*trainable/total, 3), "% of the", model_choice, "model")
 
 val_freq = 10
 
@@ -71,8 +70,8 @@ for i in range(n_layer - 1):
     if model_choice == "mistral":
         optimizers.append(AdamWScheduleFree(model.layers[i].ee.parameters(), lr=0.005))
 
-iters = 100
-model.k = 1
+iters = 150
+model.k = 10
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
 
 
@@ -90,6 +89,9 @@ for i, ex in enumerate(fw):
     if model_choice == "gpt2":
         if e.size(1) > 1024:
             e = e[:, :1024]
+    if model_choice == "mistral":
+        if e.size(0) > 1024*4:
+            e = e[:1024*4]
 
     if i % val_freq == 0:
         with torch.no_grad():
@@ -125,8 +127,12 @@ for i, ex in enumerate(fw):
     e = encode(ex["text"])
 
     # crop long inputs
-    if e.size(1) > 1024:
-        e = e[:, :1024]
+    if model_choice == "gpt2":
+        if e.size(1) > 1024:
+            e = e[:, :1024]
+    if model_choice == "mistral":
+        if e.size(0) > 1024*4:
+            e = e[:1024*4]
 
     with torch.no_grad():
         _, _, metrics_test[i,:] = model(e, train_EE = True)
@@ -184,4 +190,19 @@ if model_choice == "gpt2":
 
     for i in range(n_layer - 1):
         torch.save(model.transformer.h[i].ee.state_dict(), f"./weights/gpt2/{name}/layer_{i}_EE")
+
+
+# save EE weights
+if model_choice == "mistral":
+    i = -1
+    for n,m in model.layers[0].ee.named_modules():
+        i += 1
+    name = f"EE_{i}_layers_middle_{model.layers[0].ee.c_fc.weight.size(0)}"
+
+    # create folder with name
+    if not os.path.exists(f"./weights/mistral/{name}"):
+        os.makedirs(f"./weights/mistral/{name}")
+
+    for i in range(n_layer - 1):
+        torch.save(model.layers[i].ee.state_dict(), f"./weights/mistral/{name}/layer_{i}_EE")
 

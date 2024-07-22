@@ -7,16 +7,16 @@ from models.gpt2.model import GPTConfig
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 from mistral_common.tokens.instruct.request import InstructRequest
 from mistral_common.protocol.instruct.messages import UserMessage
-from models.mistral.model import Transformer, ModelArgs
+from models.mistral.model_EE import Transformer, ModelArgs
 
 import json
 import tiktoken
 
-model_choice = "gpt2"
+model_choice = "mistral"
 tokens_generated = 100
-path = f"./weights/{model_choice}/EE_1_layers_middle_2"
-plot_intermediate_states = False
-th_for_EE = 0.5
+path_weigths_EE = f"./weights/{model_choice}/EE_1_layers_middle_2"
+plot_intermediate_states = True
+th_for_EE = 0.9
 
 if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
@@ -31,6 +31,7 @@ elif model_choice == "mistral":
         args.lora.enable = False
         model = Transformer(args).to(torch.bfloat16).to("cuda")
     model.from_pretrained(path + "/consolidated.safetensors")
+    n_layer = model.args.n_layers
 
 if model_choice == "gpt2":
     enc = tiktoken.get_encoding("gpt2")
@@ -47,7 +48,10 @@ model.th = model.th * th_for_EE
 
 if model_choice == "gpt2":
     for i in range(n_layer - 1):
-        model.transformer.h[i].ee.load_state_dict(torch.load(f"{path}/layer_{i}_EE"))
+        model.transformer.h[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
+elif model_choice == "mistral":
+    for i in range(n_layer - 1):
+        model.layers[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
 inputs = "Nvidia is a great company because"
 
@@ -79,16 +83,16 @@ if plot_intermediate_states:
     h_states_EE = h_states_EE.cpu()
 
     # compute the diff between state i and i+1
-    norm_dif = h_states[0, 1:] - h_states[0, :-1]
-    norm_dif_EE = h_states_EE[0, 1:] - h_states_EE[0, :-1]
+    norm_dif = h_states[1:] - h_states[:-1]
+    norm_dif_EE = h_states_EE[1:] - h_states_EE[:-1]
 
     # compute the norm of the difference
     norm_dif_norm = torch.norm(norm_dif, dim=-1)
     norm_dif_EE_norm = torch.norm(norm_dif_EE, dim=-1)
 
     # compute the cosine similarity
-    cos_sim = torch.nn.functional.cosine_similarity(h_states[0, 1:], h_states[0, :-1], dim=-1)
-    cos_sim_no_EE = torch.nn.functional.cosine_similarity(h_states_EE[0, 1:], h_states_EE[0, :-1], dim=-1)
+    cos_sim = torch.nn.functional.cosine_similarity(h_states[1:], h_states[:-1], dim=-1)
+    cos_sim_no_EE = torch.nn.functional.cosine_similarity(h_states_EE[1:], h_states_EE[:-1], dim=-1)
 
     # plot the results for each layer
     import matplotlib.pyplot as plt

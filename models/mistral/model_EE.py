@@ -173,8 +173,8 @@ class EE(nn.Module):
         # Linear version of EE
         def __init__(self, args):
             super().__init__()
-            self.c_fc = nn.Linear(args.dim, 2, bias=True)
-            # self.c_proj = nn.Linear(config.n_embd * 2, 2, bias=config.bias)
+            self.c_fc = nn.Linear(args.dim, 2, bias = True) #int(args.dim / 2), bias=True)
+            # self.c_proj = nn.Linear(int(args.dim / 2), 2, bias=True)
             
         def forward(self, x):
             x = self.c_fc(x)
@@ -224,6 +224,7 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
+        use_EE = False,
     ) -> torch.Tensor:
         r = self.attention.forward_inference(self.attention_norm(x), freqs_cis)
         h = x + r
@@ -231,7 +232,11 @@ class TransformerBlock(nn.Module):
         r = self.feed_forward(self.ffn_norm(h))
         out = h + r
 
-        return out
+        if use_EE:
+            ee = self.ee(out)
+            return out, ee
+        else:
+            return out, None
 
 
 class Transformer(nn.Module):
@@ -265,6 +270,12 @@ class Transformer(nn.Module):
 
         # set lazily
         self._freqs_cis = None
+
+        self.intermediate_states = torch.zeros(args.n_layers + 1, args.block_size, args.dim, device = 'cuda')
+
+        self.th = torch.ones(args.n_layers - 1, device = 'cuda')
+
+        self.k = 1
 
     @property
     def dtype(self) -> torch.dtype:
@@ -301,33 +312,40 @@ class Transformer(nn.Module):
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
+        self.intermediate_states[0, :sum(seqlens)] = h.detach()
+
         if train_EE:
-            k = 5
-            exits = torch.zeros((1, self.args.block_size, self.args.n_layer, 2), device = input_ids.device)
-            early_exits_topk = torch.zeros((1, self.args.block_size, self.args.n_layer, k), device = input_ids.device)
+            k = self.k
+            exits = torch.zeros((1, self.args.block_size, self.args.n_layers, 2), device = input_ids.device)
+            early_exits_topk = torch.zeros((1, self.args.block_size, self.args.n_layers, k), device = input_ids.device)
        
         for i,layer in enumerate(self.layers):
 
-            if train_EE:
+            if train_EE and i != self.args.n_layers - 1:
                 h, ee = layer(h, freqs_cis, load_caches)
                 shape_ee = ee.shape
-                exits[:shape_ee[0], :shape_ee[1], i] = ee
-                early_exits_topk[:shape_ee[0], :shape_ee[1], i] = torch.topk(self.lm_head(self.transformer.ln_f(x.detach())), k, dim = 2)[1]
+                exits[0, :shape_ee[0], i] = ee
+                # early_exits_topk[0, :shape_ee[0], i] = torch.topk(self.lm_head(self.transformer.ln_f(h.detach())), k, dim = 2)[1]
+                early_exits_topk[0, :shape_ee[0], i] = torch.topk(self.output(self.norm(h.detach())).float(), k, dim = 1)[1]
             
             else:
-                h = layer(h, freqs_cis, load_caches)
+                h, _ = layer(h, freqs_cis, load_caches)
 
+            self.intermediate_states[i+1, :sum(seqlens)] = h.detach()
+            
         logits = self.output(self.norm(h)).float()
 
         if train_EE:
             
-            targets_EE = torch.argmax(logits.detach(), dim = 2).view(1, shape_ee[1], 1).repeat(1,1, self.config.n_layer)
+            targets_EE = torch.argmax(logits.detach(), dim = 1).view(1, shape_ee[0], 1).repeat(1,1, self.args.n_layers)
             
             # diff = (targets_EE == torch.argmax(early_exits_topk[:, :shape_ee[1], :], dim = 3)).to(torch.long)
 
-            diff = (targets_EE.unsqueeze(3).repeat(1,1,1,k) == early_exits_topk[:, :shape_ee[1], :]).any(3).to(torch.long)
+            diff = (targets_EE.unsqueeze(3).repeat(1,1,1,k) == early_exits_topk[:, :shape_ee[0], :]).any(3).to(torch.long)
 
             ratio = torch.sum(diff)/torch.prod(torch.tensor(diff.shape))
+
+            # ratios = [torch.sum(diff[:,:,i])/torch.prod(torch.tensor(diff[:,:,i].shape)) for i in range(self.args.n_layers)]
 
             # single loss
             # loss = F.cross_entropy(
@@ -341,13 +359,13 @@ class Transformer(nn.Module):
             
             
             # sum of losses
-            weighted_loss = torch.ones(self.args.n_layer)/self.args.n_layer
+            weighted_loss = torch.ones(self.args.n_layers)/self.args.n_layers
             loss = 0
             losses = []
-            for i in range(self.config.n_layer):
+            for i in range(self.args.n_layers):
                 loss_p = weighted_loss[i] * torch.nn.functional.cross_entropy(
-                                    exits[:shape_ee[0], :shape_ee[1], i].view(shape_ee[0] * shape_ee[1], 2),
-                                    diff[:, :, i].view(-1)
+                                    exits[0, :shape_ee[0], i].view(shape_ee[0], 2),
+                                    diff[0, :, i].view(-1)
                                     )
                 losses.append(loss_p)
                 # loss += loss_p
@@ -363,9 +381,9 @@ class Transformer(nn.Module):
             
 
             # compute accuracy between diff and exits
-            acc = (diff == torch.argmax(exits[:shape_ee[0],:shape_ee[1]], dim = 3)).to(torch.float).mean()
+            acc = (diff == torch.argmax(exits[0,:shape_ee[0]], dim = 2)).to(torch.float).mean()
             
-            predicted_labels = torch.argmax(exits[:shape_ee[0], :shape_ee[1]], dim=3)
+            predicted_labels = torch.argmax(exits[0, :shape_ee[0]], dim = 2)
 
             true_labels = diff.view(-1)
             predicted_labels = predicted_labels.view(-1)
@@ -387,7 +405,7 @@ class Transformer(nn.Module):
 
             metrics = torch.tensor([acc.item(), recall, precision, f1, ratio])
 
-            return logits, losses, metrics  
+            return logits, losses, metrics
 
         else:
                    
@@ -397,6 +415,7 @@ class Transformer(nn.Module):
         self,
         input_ids: torch.Tensor,
         seqlens: List[int],
+        use_EE = False,
     ) -> torch.Tensor:
         # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
@@ -406,13 +425,53 @@ class Transformer(nn.Module):
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
-        for layer in self.layers:
-            h = layer.forward_inference(h, freqs_cis)
+        self.intermediate_states[0, sum(seqlens) - 1] = h.detach()
+
+        for i, layer in enumerate(self.layers):
+
+            h, ee = layer.forward_inference(h, freqs_cis, use_EE = use_EE)
+
+            if use_EE:
+
+                ee = torch.nn.functional.softmax(ee[0], dim = 0)
+                ind = torch.argmax(ee)
+
+                if ind == 1 and i < self.args.n_layers - 1:
+
+                    if ee[ind] > self.th[i]:
+                        print("Early exit at layer:", i + 1, " position:", sum(seqlens))
+                        
+                        if not hasattr(self, 'exits_done'):
+                            self.exits_done = []
+
+                        self.exits_done.append(i + 1)
+
+                        # propagate intermediate states
+                        for j in range(i+1, self.args.n_layers):
+
+                            norm_x = self.layers[j].attention_norm(h)
+                            k = self.layers[j].attention.wk(norm_x)
+                            v = self.layers[j].attention.wv(norm_x)
+
+                            # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
+                            # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
+
+                            self.layers[j].attention.k[sum(seqlens) - 1] = k.view(self.args.n_kv_heads, self.args.head_dim)
+                            self.layers[j].attention.v[sum(seqlens) - 1] = v.view(self.args.n_kv_heads, self.args.head_dim)
+
+                            # self.intermediate_states[0, j+1, pos - 1] = x.detach()
+                            # self.intermediate_states[0, j+1, pos - 1] = x.detach()
+                            
+                        h, _ = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
+
+                        break
+                
+            self.intermediate_states[i+1, sum(seqlens) - 1] = h.detach()
 
         return self.output(self.norm(h)).float()
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -420,7 +479,7 @@ class Transformer(nn.Module):
         """
         # COLD start
         pos = idx.shape[0]
-        logits = self(idx, seqlens = [pos], load_caches = True) # just to make sure the model is in the right shape
+        logits, _, _ = self(idx, load_caches = True) # just to make sure the model is in the right shape
 
         logits = logits[-1, :] / temperature
         # optionally crop the logits to only the top k options
@@ -439,7 +498,7 @@ class Transformer(nn.Module):
 
         for _ in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx_next, seqlens=[idx.shape[0]])
+            logits = self.forward_inference(idx_next, seqlens=[idx.shape[0]], use_EE = use_EE)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[-1, :] / temperature
             # optionally crop the logits to only the top k options

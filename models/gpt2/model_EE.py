@@ -368,7 +368,7 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(torch.tensor(pos, device = idx.device)) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
-        self.intermediate_states[0, 0, pos] = x.detach()
+        self.intermediate_states[0, 0, pos - 1] = x.detach()
 
         for i, block in enumerate(self.transformer.h):
             x, ee = block.forward_inference(x, pos, use_EE = use_EE)
@@ -406,7 +406,7 @@ class GPT(nn.Module):
 
                         break
 
-            self.intermediate_states[0, i+1, pos] = x.detach()
+            self.intermediate_states[0, i+1, pos - 1] = x.detach()
 
         x = self.transformer.ln_f(x)
 
