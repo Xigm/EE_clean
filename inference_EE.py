@@ -16,7 +16,7 @@ model_choice = "mistral"
 tokens_generated = 100
 path_weigths_EE = f"./weights/{model_choice}/EE_1_layers_middle_2"
 plot_intermediate_states = True
-th_for_EE = 0.9
+th_for_EE = 0.95
 
 if model_choice == "gpt2":
     GPTConfig.vocab_size = 50257
@@ -53,21 +53,21 @@ elif model_choice == "mistral":
     for i in range(n_layer - 1):
         model.layers[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
-inputs = "Nvidia is a great company because"
+inputs = "Hey my name is Mariama! How are you?"
 
 with torch.no_grad():
-    output = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
+    output1 = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
 
 h_states = model.intermediate_states.clone()
 
-print(decode(output))
+print(decode(output1))
 
 with torch.no_grad():
-    output = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
+    output2 = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
 
 h_states_EE = model.intermediate_states
 
-print(decode(output))
+print(decode(output2))
 
 exits_done = model.exits_done
 
@@ -100,22 +100,26 @@ if plot_intermediate_states:
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
     axis_x = torch.arange(1, n_layer+1)
 
-    for i in range(len(encode(inputs)), tokens_generated + len(encode(inputs))):
-        axs[0,0].plot(axis_x, norm_dif_norm[:,i])
-        axs[1,0].plot(axis_x, norm_dif_EE_norm[:,i])
+    for i in torch.arange(tokens_generated + len(encode(inputs))):
+        if max(norm_dif_norm[:,i]) < 100:
+            axs[0,0].plot(axis_x, norm_dif_norm[:,i])
+        if max(norm_dif_EE_norm[:,i]) < 100:
+            axs[1,0].plot(axis_x, norm_dif_EE_norm[:,i])
 
 
     axs[0,0].set_title("Norm of the difference between states")
-    axs[0,0].plot(axis_x, norm_dif_norm.mean(-1), color = 'b')
-    axs[1,0].plot(axis_x, norm_dif_EE_norm.mean(-1), color = 'b')
+    axs[0,0].plot(axis_x, norm_dif_norm[:,1: tokens_generated + len(encode(inputs))].mean(-1), color = 'black')
+    axs[1,0].plot(axis_x, norm_dif_EE_norm[:, 1: tokens_generated + len(encode(inputs))].mean(-1), color = 'black')
 
-    for i in range(len(encode(inputs)), tokens_generated + len(encode(inputs))):
-        axs[0,1].plot(axis_x, cos_sim[:,i])
-        axs[1,1].plot(axis_x, cos_sim_no_EE[:,i])
+    for i in torch.arange(tokens_generated + len(encode(inputs))):
+        if not (cos_sim[:,i] >= 0.998).any():
+            axs[0,1].plot(axis_x, cos_sim[:,i])
+        if not (cos_sim_no_EE[:,i] >= 0.998).any():
+            axs[1,1].plot(axis_x, cos_sim_no_EE[:,i])
 
     axs[0,1].set_title("Cosine similarity between states")
-    axs[0,1].plot(axis_x, cos_sim.mean(-1), color = 'b')
-    axs[1,1].plot(axis_x, cos_sim_no_EE.mean(-1), color = 'b')
+    axs[0,1].plot(axis_x, cos_sim[:, 1: tokens_generated + len(encode(inputs))].mean(-1), color = 'black')
+    axs[1,1].plot(axis_x, cos_sim_no_EE[:, 1: tokens_generated + len(encode(inputs))].mean(-1), color = 'black')
 
     for ax in axs.reshape(-1):
         ax.legend()
@@ -123,4 +127,15 @@ if plot_intermediate_states:
         ax.set_ylabel("Value")
 
     plt.show()
+
+
+# for i in range(tokens_generated):
+#     print(f"Token {i}:")
+#     print("Norm of the difference between states:", norm_dif_norm[:,i].mean().item())
+#     print("Norm of the difference between states with EE:", norm_dif_EE_norm[:,i].mean().item())
+#     print("Cosine similarity between states:", cos_sim[:,i].mean().item())
+#     print("Cosine similarity between states with EE:", cos_sim_no_EE[:,i].mean().item())
+
+
+print("Play with arrays")
 

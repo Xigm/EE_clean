@@ -38,7 +38,10 @@ if model_choice == "mistral":
     encode = lambda s: torch.tensor(enc.encode_instruct(createMsg(s)).tokens, device = "cuda")
     decode = lambda l: enc.decode(l.tolist())
 
-with torch.no_grad():
-    output = model.generate(encode("Nvidia is a great company because"), temperature=1, max_new_tokens=tokens_generated, top_k = 10)
+inputs = "Hey my name is Mariama! How are you?"
 
+with torch.no_grad():
+    output = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10)
+
+print(output)
 print(decode(output))
