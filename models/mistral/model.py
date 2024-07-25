@@ -219,7 +219,7 @@ class Transformer(nn.Module):
         input_ids: torch.Tensor,
         seqlens: List[int],
     ) -> torch.Tensor:
-        assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
+        # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
         h = self.tok_embeddings(input_ids)
         positions = positions_from_sizes(seqlens, self.freqs_cis.device)

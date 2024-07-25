@@ -53,17 +53,17 @@ elif model_choice == "mistral":
     for i in range(n_layer - 1):
         model.layers[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
-inputs = "Hey my name is Mariama! How are you?"
+inputs = "Tell me a story about a princess and a dragon."
 
 with torch.no_grad():
-    output1 = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
+    output1 = model.generate(encode(inputs), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
 
 h_states = model.intermediate_states.clone()
 
 print(decode(output1))
 
 with torch.no_grad():
-    output2 = model.generate(encode(inputs), temperature=1, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
+    output2 = model.generate(encode(inputs), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
 
 h_states_EE = model.intermediate_states
 
