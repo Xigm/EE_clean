@@ -18,14 +18,32 @@ import os
 from schedulefree import AdamWScheduleFree
 
 # use name="sample-10BT" to use the 10BT sample
-fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
+fw = load_dataset("./datasets/fineweb-edu/samples/", name="default", split="train", streaming=True)
 
-model_choice = "mistral"
+model_choice = "gpt2"
+size = "350" # 124M, 350M, 774M, 1558M
+path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+path_weigths_EE = path + f"./EE_1_layers_middle_2"
 
 if model_choice == "gpt2":
-    GPTConfig.vocab_size = 50257
-    model = GPT(GPTConfig)
-    model.from_pretrained("gpt2")
+    
+    # open config file
+    with open(path + "/config.json") as f:
+        config = json.load(f)
+
+    # dump config into GPTConfig
+    config_dataclass = GPTConfig(   block_size = config['n_ctx'],
+                                    vocab_size = config['vocab_size'],
+                                    n_layer = config['n_layer'],
+                                    n_head = config['n_head'],
+                                    n_embd = config['n_embd'],
+                                    dropout = config['attn_pdrop'],
+                                    bias = True,
+                                )
+
+    model = GPT(config_dataclass)
+    model.from_hf(path + "/model.safetensors")
+
     model.to("cuda")
     n_layer = model.config.n_layer
     
@@ -71,7 +89,7 @@ for i in range(n_layer - 1):
         optimizers.append(AdamWScheduleFree(model.layers[i].ee.parameters(), lr=0.005))
 
 iters = 150
-model.k = 10
+model.k = 20
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
 
 
@@ -185,11 +203,11 @@ if model_choice == "gpt2":
     name = f"EE_{i}_layers_middle_{model.transformer.h[0].ee.c_fc.weight.size(0)}"
 
     # create folder with name
-    if not os.path.exists(f"./weights/gpt2/{name}"):
-        os.makedirs(f"./weights/gpt2/{name}")
+    if not os.path.exists(path +f"./{name}"):
+        os.makedirs(path +  f"./{name}")
 
     for i in range(n_layer - 1):
-        torch.save(model.transformer.h[i].ee.state_dict(), f"./weights/gpt2/{name}/layer_{i}_EE")
+        torch.save(model.transformer.h[i].ee.state_dict(), path + f"./{name}/layer_{i}_EE")
 
 
 # save EE weights

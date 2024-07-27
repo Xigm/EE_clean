@@ -15,6 +15,18 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from safetensors.torch import load_file
+
+class newGelu(nn.Module):
+    """
+    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
+    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
+    """
+
+    def forward(self, input):
+        return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+
+
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
 
@@ -47,7 +59,7 @@ class CausalSelfAttention(nn.Module):
         # print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-                                    .view(1, 1, config.block_size, config.block_size))
+                                    .view(1, 1, config.block_size, config.block_size), persistent = False)
 
     def forward(self, x, load_caches = False):
 
@@ -115,7 +127,7 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.gelu    = nn.GELU()
+        self.gelu    = newGelu()        
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
@@ -224,7 +236,7 @@ class GPT(nn.Module):
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
 
 
-        self.intermediate_states = torch.zeros((1, 13, 1024, 768), device = 'cuda')
+        self.intermediate_states = torch.zeros((1, self.config.n_layer + 1, self.config.block_size, self.config.n_embd), device = 'cuda')
 
         # default to 1.0 for all layers
         self.th = torch.ones(config.n_layer - 1, device = 'cuda')
@@ -381,7 +393,7 @@ class GPT(nn.Module):
                 if ind == 1 and i < self.config.n_layer - 1:
 
                     if ee[ind] > self.th[i]:
-                        print("Early exit at layer:", i + 1, " position:", pos)
+                        # print("Early exit at layer:", i + 1, " position:", pos)
                         
                         if not hasattr(self, 'exits_done'):
                             self.exits_done = []
@@ -487,6 +499,29 @@ class GPT(nn.Module):
 
         for i in range(self.config.n_layer - 1):
             self.transformer.h[i].ee.load_state_dict(torch.load(path))
+
+    @torch.no_grad()
+    def from_hf(self, path, dtype: torch.dtype = torch.bfloat16):
+
+        # load the model
+        sd_hf = load_file(path, device = 'cpu')
+
+        for k, v in sd_hf.items():
+            # weirdly, the huggingface model weights are transposed
+            if not "wte" in k and not "wpe" in k:
+                if len(v.shape) == 2:
+                    sd_hf[k] = v.T
+                elif len(v.shape) == 1:
+                    continue
+                else:
+                    print("????", k, v.shape)
+            if v.dtype != dtype:
+                sd_hf[k] = v.to(dtype)
+
+        # as we used weight tying
+        sd_hf["lm_head.weight"] = sd_hf["transformer.wte.weight"]
+
+        self.load_state_dict(sd_hf, strict = False)
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters

@@ -12,16 +12,34 @@ from models.mistral.model_EE import Transformer, ModelArgs
 import json
 import tiktoken
 
-model_choice = "mistral"
+model_choice = "gpt2"
 tokens_generated = 100
-path_weigths_EE = f"./weights/{model_choice}/EE_1_layers_middle_2"
+size = "350" # 124M, 350M, 774M, 1558M
+path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+path_weigths_EE = path + f"./EE_1_layers_middle_2"
 plot_intermediate_states = True
-th_for_EE = 0.95
+th_for_EE = 0.7
 
 if model_choice == "gpt2":
-    GPTConfig.vocab_size = 50257
-    model = GPT(GPTConfig)
-    model.from_pretrained("gpt2")
+    
+    # open config file
+    with open(path + "/config.json") as f:
+        config = json.load(f)
+
+    # dump config into GPTConfig
+    config_dataclass = GPTConfig(   block_size = config['n_ctx'],
+                                    vocab_size = config['vocab_size'],
+                                    n_layer = config['n_layer'],
+                                    n_head = config['n_head'],
+                                    n_embd = config['n_embd'],
+                                    dropout = config['attn_pdrop'],
+                                    bias = True,
+                                )
+
+    model = GPT(config_dataclass)
+    model.from_hf(path + "/model.safetensors")
+
+    model.to("cuda")
     n_layer = model.config.n_layer
     
 elif model_choice == "mistral":
@@ -53,17 +71,17 @@ elif model_choice == "mistral":
     for i in range(n_layer - 1):
         model.layers[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
-inputs = "Tell me a story about a princess and a dragon."
+inputs = "A rose is a type of flower that"
 
 with torch.no_grad():
-    output1 = model.generate(encode(inputs), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
+    output1 = model.generate(encode(inputs).to("cuda"), temperature=1e-6, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
 
 h_states = model.intermediate_states.clone()
 
 print(decode(output1))
 
 with torch.no_grad():
-    output2 = model.generate(encode(inputs), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
+    output2 = model.generate(encode(inputs).to("cuda"), temperature=1e-6, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
 
 h_states_EE = model.intermediate_states
 
@@ -79,8 +97,8 @@ print(f"EEs saved {100*saved/(n_layer*tokens_generated)}% computation")
 if plot_intermediate_states:
 
     # states to cpu
-    h_states = h_states.cpu()
-    h_states_EE = h_states_EE.cpu()
+    h_states = h_states.cpu()[0]
+    h_states_EE = h_states_EE.cpu()[0]
 
     # compute the diff between state i and i+1
     norm_dif = h_states[1:] - h_states[:-1]

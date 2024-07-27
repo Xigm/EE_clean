@@ -1,7 +1,7 @@
 import torch
 
 # import models.mistral.model as mistral_model
-from models.gpt2.model_EE import GPT
+from models.gpt2.model import GPT
 from models.gpt2.model import GPTConfig
 
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
@@ -12,13 +12,33 @@ from models.mistral.model import Transformer, ModelArgs
 import json
 import tiktoken
 
-model_choice = "mistral"
+model_choice = "gpt2"
 tokens_generated = 50
+size = "350" # 124M, 350M, 774M, 1558M
+path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
 
 if model_choice == "gpt2":
-    GPTConfig.vocab_size = 50257
-    model = GPT(GPTConfig)
-    model.from_pretrained("gpt2")
+
+    # open config file
+    with open(path + "/config.json") as f:
+        config = json.load(f)
+
+    # dump config into GPTConfig
+    config_dataclass = GPTConfig(   
+                                    block_size = config['n_ctx'],
+                                    vocab_size = config['vocab_size'],
+                                    n_layer = config['n_layer'],
+                                    n_head = config['n_head'],
+                                    n_embd = config['n_embd'],
+                                    dropout = config['attn_pdrop'],
+                                    bias = True,
+                                )
+
+    model = GPT(config_dataclass)
+    model.from_hf(path + "/model.safetensors")
+
+    model.to("cuda")
+    n_layer = model.config.n_layer
     
 elif model_choice == "mistral":
     path = "./weights/mistral/7b-v0.3"
@@ -38,10 +58,10 @@ if model_choice == "mistral":
     encode = lambda s: torch.tensor(enc.encode_instruct(createMsg(s)).tokens, device = "cuda")
     decode = lambda l: enc.decode(l.tolist())
 
-inputs = "Tell me a story about a princess and a dragon."
+inputs = "A rose is a type of flower that"
 
 with torch.no_grad():
-    output = model.generate(encode(inputs), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10)
+    output = model.generate(encode(inputs).to("cuda"), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10)
 
 print(output)
 print(decode(output))
