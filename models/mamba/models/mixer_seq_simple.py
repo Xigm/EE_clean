@@ -11,17 +11,17 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 
-from mamba.models.config_mamba import MambaConfig
-from mamba.modules.mamba_simple import Mamba
-from mamba.modules.mamba2 import Mamba2
-from mamba.modules.mha import MHA
-from mamba.modules.mlp import GatedMLP
-from mamba.modules.block import Block
-from mamba.utils.generation import GenerationMixin
-from mamba.utils.hf import load_config_hf, load_state_dict_hf
+from models.mamba.models.config_mamba import MambaConfig
+from models.mamba.modules.mamba_simple import Mamba
+from models.mamba.modules.mamba2 import Mamba2
+from models.mamba.modules.mha import MHA
+from models.mamba.modules.mlp import GatedMLP
+from models.mamba.modules.block import Block
+from models.mamba.utils.generation import GenerationMixin
+from models.mamba.utils.hf import load_config_hf, load_state_dict_hf
 
 try:
-    from mamba.ops.triton.layer_norm import RMSNorm, layer_norm_fn, rms_norm_fn
+    from models.mamba.ops.triton.layer_norm import RMSNorm, layer_norm_fn, rms_norm_fn
 except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 

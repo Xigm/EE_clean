@@ -9,13 +9,18 @@ from mistral_common.tokens.instruct.request import InstructRequest
 from mistral_common.protocol.instruct.messages import UserMessage
 from models.mistral.model import Transformer, ModelArgs
 
+from models.mamba.models.config_mamba import MambaConfig
+from models.mamba.models.mixer_seq_simple import MixerModel
+
 import json
 import tiktoken
 
 model_choice = "gpt2"
-tokens_generated = 50
-size = "350" # 124M, 350M, 774M, 1558M
-path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+tokens_generated = 30
+size = "124" # 124M, 350M, 774M, 1558M
+# path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+path = f"./weights/gpt2/gpt2"
+
 
 if model_choice == "gpt2":
 
@@ -48,6 +53,14 @@ elif model_choice == "mistral":
         model = Transformer(args).to(torch.bfloat16).to("cuda")
     model.from_pretrained(path + "/consolidated.safetensors")
 
+elif model_choice == "mamba":
+    path = "./weights/mamba/mamba-codestral-7B-v0.1"
+    with open(path+ "/params.json") as f:
+        args = MambaConfig(**dict(json.load(f)))
+        # args.lora.enable = False
+        model = MixerModel(args).to(torch.bfloat16).to("cuda")
+    model.from_pretrained(path + "/consolidated.safetensors")
+
 if model_choice == "gpt2":
     enc = tiktoken.get_encoding("gpt2")
     encode = lambda s: torch.tensor(enc.encode(s, allowed_special={"<|endoftext|>"}))[None, :]
@@ -58,10 +71,10 @@ if model_choice == "mistral":
     encode = lambda s: torch.tensor(enc.encode_instruct(createMsg(s)).tokens, device = "cuda")
     decode = lambda l: enc.decode(l.tolist())
 
-inputs = "A rose is a type of flower that"
+inputs = "Hello, I'm a language model,"
 
 with torch.no_grad():
-    output = model.generate(encode(inputs).to("cuda"), temperature=0.7, max_new_tokens=tokens_generated, top_k = 10)
+    output = model.generate(encode(inputs).to("cuda"), temperature=0.5, max_new_tokens=tokens_generated, top_k = 10)
 
 print(output)
 print(decode(output))

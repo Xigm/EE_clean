@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 from torch import nn, Tensor
 
-from mamba.ops.triton.layer_norm import RMSNorm, layer_norm_fn
+from models.mamba.ops.triton.layer_norm import RMSNorm, layer_norm_fn
 
 
 class Block(nn.Module):
