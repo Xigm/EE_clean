@@ -14,11 +14,12 @@ import tiktoken
 
 model_choice = "gpt2"
 tokens_generated = 100
-size = "124" # 124M, 350M, 774M, 1558M
-path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
-path_weigths_EE = path + f"./EE_1_layers_middle_2"
+size = "350" # 124M, 350M, 774M, 1558M
+# path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+path = f"./weights/gpt2/gpt2"
+path_weigths_EE = path + f"/EE_1_layers_middle_2"
 plot_intermediate_states = True
-th_for_EE = 0.7
+th_for_EE = 0.99
 
 if model_choice == "gpt2":
     

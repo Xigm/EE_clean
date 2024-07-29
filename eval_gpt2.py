@@ -89,7 +89,7 @@ print("Evaluating...")
 
 results = simple_evaluate(
     model = lm_obj,
-    tasks = ["hellaswag"],
+    tasks = ["truthfulqa"],
     num_fewshot = 0,
 )
 

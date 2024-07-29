@@ -506,22 +506,82 @@ class GPT(nn.Module):
         # load the model
         sd_hf = load_file(path, device = 'cpu')
 
-        for k, v in sd_hf.items():
-            # weirdly, the huggingface model weights are transposed
-            if not "wte" in k and not "wpe" in k:
-                if len(v.shape) == 2:
-                    sd_hf[k] = v.T
-                elif len(v.shape) == 1:
-                    continue
-                else:
-                    print("????", k, v.shape)
-            if v.dtype != dtype:
-                sd_hf[k] = v.to(dtype)
+        transformer_name = True if "transformer" in list(sd_hf.keys())[0] else False
+
+        if transformer_name:
+            for k, v in sd_hf.items():
+                # weirdly, the huggingface model weights are transposed
+                if not "wte" in k and not "wpe" in k:
+                    if len(v.shape) == 2:
+                        sd_hf[k] = v.T
+                    elif len(v.shape) == 1:
+                        continue
+                    else:
+                        print("????", k, v.shape)
+
+                if v.dtype != dtype:
+                    sd_hf[k] = v.to(dtype)
+        else:
+
+            to_del = []
+            
+            for k, v in sd_hf.items():
+
+                if "bias" in k and len(v.shape) == 4:
+                    to_del.append(k)
+
+                # if len(v.shape) == 2 and (not "wte" in k and not "wpe" in k):
+                #     sd_hf[k] = sd_hf[k].t()
+                #     print(k)
+                    # pass
+
+                if v.dtype != dtype:
+                    sd_hf[k] = v.to(dtype)
+
+            for k in to_del:
+                del sd_hf[k]
+
+            for k, v in sd_hf.items():
+
+                if "bias" in k and len(v.shape) == 4:
+                    to_del.append(k)
+
+                if len(v.shape) == 2 and (not "wte" in k and not "wpe" in k):
+                    sd_hf[k] = sd_hf[k].t()
+                    # print(k)
+
 
         # as we used weight tying
-        sd_hf["lm_head.weight"] = sd_hf["transformer.wte.weight"]
+        if transformer_name:
+            sd_hf["lm_head.weight"] = sd_hf["transformer.wte.weight"]
+            self.load_state_dict(sd_hf)
 
-        self.load_state_dict(sd_hf, strict = False)
+        else:
+            self.transformer.load_state_dict(sd_hf, strict = False)
+            self.lm_head.load_state_dict({"weight" : sd_hf["wte.weight"]})
+
+    # @torch.no_grad()
+    # def from_hf(self, path, dtype: torch.dtype = torch.bfloat16):
+
+    #     # load the model
+    #     sd_hf = load_file(path, device = 'cpu')
+
+    #     for k, v in sd_hf.items():
+    #         # weirdly, the huggingface model weights are transposed
+    #         if not "wte" in k and not "wpe" in k:
+    #             if len(v.shape) == 2:
+    #                 sd_hf[k] = v.T
+    #             elif len(v.shape) == 1:
+    #                 continue
+    #             else:
+    #                 print("????", k, v.shape)
+    #         if v.dtype != dtype:
+    #             sd_hf[k] = v.to(dtype)
+
+    #     # as we used weight tying
+    #     sd_hf["lm_head.weight"] = sd_hf["transformer.wte.weight"]
+
+    #     self.load_state_dict(sd_hf, strict = False)
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters

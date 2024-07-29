@@ -22,7 +22,8 @@ fw = load_dataset("./datasets/fineweb-edu/samples/", name="default", split="trai
 
 model_choice = "gpt2"
 size = "350" # 124M, 350M, 774M, 1558M
-path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+# path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
+path = f"./weights/gpt2/gpt2"
 path_weigths_EE = path + f"./EE_1_layers_middle_2"
 
 if model_choice == "gpt2":
@@ -89,7 +90,7 @@ for i in range(n_layer - 1):
         optimizers.append(AdamWScheduleFree(model.layers[i].ee.parameters(), lr=0.005))
 
 iters = 150
-model.k = 20
+model.k = 10    
 metrics_val, metrics = torch.zeros((int(iters/val_freq), 5)), torch.zeros((int(iters-iters/val_freq),5))
 
 
@@ -203,11 +204,11 @@ if model_choice == "gpt2":
     name = f"EE_{i}_layers_middle_{model.transformer.h[0].ee.c_fc.weight.size(0)}"
 
     # create folder with name
-    if not os.path.exists(path +f"./{name}"):
-        os.makedirs(path +  f"./{name}")
+    if not os.path.exists(path +f"/{name}"):
+        os.makedirs(path +  f"/{name}")
 
     for i in range(n_layer - 1):
-        torch.save(model.transformer.h[i].ee.state_dict(), path + f"./{name}/layer_{i}_EE")
+        torch.save(model.transformer.h[i].ee.state_dict(), path + f"/{name}/layer_{i}_EE")
 
 
 # save EE weights

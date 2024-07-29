@@ -335,7 +335,7 @@ class gpt2_custom(TemplateLM):
                     f"Expected `kwargs` to be of type `dict` but got {type(gen_kwargs)}"
                 )
             # add EOS token to stop sequences
-            eos = self.tok_decode(self.eot_token_id, skip_special_tokens=False)
+            eos = self.tok_decode([self.eot_token_id], skip_special_tokens=False)
             if not until:
                 until = [eos]
             else:
@@ -397,7 +397,7 @@ class gpt2_custom(TemplateLM):
 
     @property
     def eot_token_id(self):
-        return self.tokenizer.eos_id
+        return self.tokenizer.eot_token
 
     @property
     def prefix_token_id(self):
@@ -453,11 +453,12 @@ class gpt2_custom(TemplateLM):
         #     for i, x in enumerate(encoded_prompts):
         #         res.append(tokenizer.decode(x[:min_prompt_len] + generated[i].tolist()))
 
-        inputs = tokenizer.encode(prompts)
+        #  = tokenizer.encode()
+        inputs = torch.tensor(tokenizer.encode(prompts[0], allowed_special={"<|endoftext|>"}), device = "cuda")[None, :]
 
-        outputs = model.generate(inputs, until, max_tokens)
+        outputs = model.generate(inputs, max_tokens, until)
 
-        res = tokenizer.decode(outputs)
+        res = tokenizer.decode(outputs.cpu()[0,:].tolist())
 
         return res
 
