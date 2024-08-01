@@ -74,7 +74,7 @@ print("Evaluating...")
 
 results = simple_evaluate(
     model = lm_obj,
-    tasks = ["mathqa"],
+    tasks = ["truthfulqa"],
     num_fewshot = 0,
 )
 
