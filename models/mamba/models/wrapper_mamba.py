@@ -59,24 +59,26 @@ class Mamba(ModelBase, nn.Module):
         result: torch.Tensor = lm_output.logits
         return result
 
-    @staticmethod
+    
     def from_folder(
+        self,
         folder: Union[Path, str],
         max_batch_size: int = 1,
         num_pipeline_ranks: int = 1,
         device: Union[torch.device, str] = "cuda",
         dtype: Optional[torch.dtype] = None,
     ) -> "Mamba":
-        with open(Path(folder) / "params.json", "r") as f:
-            model_args = MambaArgs.from_dict(json.load(f))
+        # with open(Path(folder) / "params.json", "r") as f:
+        #     model_args = MambaArgs.from_dict(json.load(f))
 
-        with torch.device("meta"):
-            model = Mamba(model_args)
+        # with torch.device("meta"):
+        #     model = Mamba(model_args)
 
         model_file = Path(folder) / "consolidated.safetensors"
 
         assert model_file.exists(), f"Make sure {model_file} exists."
         loaded = safetensors.torch.load_file(str(model_file))
 
-        model.load_state_dict(loaded, assign=True, strict=True)
-        return model.to(device=device, dtype=dtype)
+        self.load_state_dict(loaded, assign=True, strict=True)
+
+        # self.to(device=device, dtype=dtype)

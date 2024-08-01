@@ -3,8 +3,8 @@ from typing import Optional
 
 from simple_parsing.helpers import Serializable
 
-from mistral_inference.lora import LoraArgs
-from mistral_inference.moe import MoeArgs
+from models.mamba.mistral_inference.lora import LoraArgs
+from models.mamba.mistral_inference.moe import MoeArgs
 
 
 @dataclass
