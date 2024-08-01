@@ -521,7 +521,8 @@ class Transformer(nn.Module):
         sd_hf = load_file(path, device = 'cpu')
 
         for k, v in sd_hf.items():
-            sd_hf[k] = v.to(dtype)
+            if v.dtype != dtype:
+                sd_hf[k] = v.to(dtype)
 
         self.load_state_dict(sd_hf, strict = False)
 
