@@ -62,13 +62,18 @@ elif model_choice == "mamba":
         model_args = MambaArgs.from_dict(json.load(f))
         print(model_args)
 
-    with torch.device("meta"):
-        model = Mamba(model_args)
+    model = Mamba(model_args)
+    model.to(torch.bfloat16).to("cuda")
 
     import time
     start_time = time.time()
     model.from_folder("./weights/mamba/mamba-codestral-7B-v0.1")
     print(f"Time to load model: {time.time() - start_time}")
+
+    # start_time = time.time()
+    # model.to("cuda")
+    # print(f"Time to load model to GPU: {time.time() - start_time}")
+    n_layer = model_args.n_layers
 
 if model_choice == "gpt2":
     enc = tiktoken.get_encoding("gpt2")
