@@ -6,6 +6,6 @@ weights/*
 
 datasets/*
 
-*EE*
+# *EE*
 
 .vscode*

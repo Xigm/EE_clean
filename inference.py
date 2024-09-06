@@ -63,29 +63,29 @@ elif model_choice == "mamba":
         print(model_args)
 
 
-    model_args.dim = 256
-    model_args.n_layers = 12
-    model_args.vocab_size = 32768
-    model_args.n_groups = 8
-    model_args.rms_norm=True
-    model_args.residual_in_fp32=True
-    model_args.fused_add_norm=True
-    model_args.pad_vocab_size_multiple=1
-    model_args.tie_embeddings=False
-    model_args.model_type='mamba'
+    # model_args.dim = 256
+    # model_args.n_layers = 12
+    # model_args.vocab_size = 32768
+    # model_args.n_groups = 8
+    # model_args.rms_norm=True
+    # model_args.residual_in_fp32=True
+    # model_args.fused_add_norm=True
+    # model_args.pad_vocab_size_multiple=1
+    # model_args.tie_embeddings=False
+    # model_args.model_type='mamba'
 
 
     model = Mamba(model_args)
-    model.to("cuda")
-
-    # import time
-    # start_time = time.time()
-    # model.from_folder("./weights/mamba/mamba-codestral-7B-v0.1")
-    # print(f"Time to load model: {time.time() - start_time}")
-
-    # start_time = time.time()
     # model.to("cuda")
-    # print(f"Time to load model to GPU: {time.time() - start_time}")
+
+    import time
+    start_time = time.time()
+    model.from_folder("./weights/mamba/mamba-codestral-7B-v0.1")
+    print(f"Time to load model: {time.time() - start_time}")
+
+    start_time = time.time()
+    model.to("cuda")
+    print(f"Time to load model to GPU: {time.time() - start_time}")
     n_layer = model_args.n_layers
 
 if model_choice == "gpt2":

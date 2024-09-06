@@ -202,8 +202,6 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
         self.args = args
 
-        self.ee = EE(args)
-
     def forward(
         self,
         x: torch.Tensor,
@@ -216,9 +214,7 @@ class TransformerBlock(nn.Module):
         r = self.feed_forward(self.ffn_norm(h))
         out = h + r
 
-        ee = self.ee(out)
-
-        return out, ee
+        return out
     
     def forward_inference(
         self,
@@ -232,11 +228,7 @@ class TransformerBlock(nn.Module):
         r = self.feed_forward(self.ffn_norm(h))
         out = h + r
 
-        if use_EE:
-            ee = self.ee(out)
-            return out, ee
-        else:
-            return out, None
+        return out
 
 
 class Transformer(nn.Module):
@@ -267,6 +259,10 @@ class Transformer(nn.Module):
             args.vocab_size,
             bias=False,
         )
+
+        if args.ee_pos is not None:
+            self.ee_pos = args.ee_pos
+            self.ee = torch.nn.ModuleList([EE(args) for _ in range(len(args.ee_pos))])
 
         # set lazily
         self._freqs_cis = None
@@ -316,20 +312,23 @@ class Transformer(nn.Module):
 
         if train_EE:
             k = self.k
-            exits = torch.zeros((1, self.args.block_size, self.args.n_layers, 2), device = input_ids.device)
-            early_exits_topk = torch.zeros((1, self.args.block_size, self.args.n_layers, k), device = input_ids.device)
-       
+            exits = torch.zeros((1, self.args.block_size, len(self.args.ee_pos), 2), device = input_ids.device)
+            early_exits_topk = torch.zeros((1, self.args.block_size, len(self.args.ee_pos), k), device = input_ids.device)
+        
+        ee_index = 0
         for i,layer in enumerate(self.layers):
 
             if train_EE and i != self.args.n_layers - 1:
-                h, ee = layer(h, freqs_cis, load_caches)
-                shape_ee = ee.shape
-                exits[0, :shape_ee[0], i] = ee
-                # early_exits_topk[0, :shape_ee[0], i] = torch.topk(self.lm_head(self.transformer.ln_f(h.detach())), k, dim = 2)[1]
-                early_exits_topk[0, :shape_ee[0], i] = torch.topk(self.output(self.norm(h.detach())).float(), k, dim = 1)[1]
-            
+                h = layer(h, freqs_cis, load_caches)
+                if i in self.ee_pos:
+                    ee = self.ee[ee_index](h)
+                    shape_ee = ee.shape
+                    exits[0, :shape_ee[0], ee_index] = ee
+                    # early_exits_topk[0, :shape_ee[0], i] = torch.topk(self.lm_head(self.transformer.ln_f(h.detach())), k, dim = 2)[1]
+                    early_exits_topk[0, :shape_ee[0], ee_index] = torch.topk(self.output(self.norm(h.detach())).float(), k, dim = 1)[1]
+                    ee_index += 1
             else:
-                h, _ = layer(h, freqs_cis, load_caches)
+                h = layer(h, freqs_cis, load_caches)
 
             self.intermediate_states[i+1, :sum(seqlens)] = h.detach()
             
@@ -337,7 +336,7 @@ class Transformer(nn.Module):
 
         if train_EE:
             
-            targets_EE = torch.argmax(logits.detach(), dim = 1).view(1, shape_ee[0], 1).repeat(1,1, self.args.n_layers)
+            targets_EE = torch.argmax(logits.detach(), dim = 1).view(1, shape_ee[0], 1).repeat(1,1, len(self.args.ee_pos))
             
             # diff = (targets_EE == torch.argmax(early_exits_topk[:, :shape_ee[1], :], dim = 3)).to(torch.long)
 
@@ -359,16 +358,18 @@ class Transformer(nn.Module):
             
             
             # sum of losses
-            weighted_loss = torch.ones(self.args.n_layers)/self.args.n_layers
+            weighted_loss = torch.ones(len(self.args.ee_pos))/len(self.args.ee_pos)
             loss = 0
             losses = []
-            for i in range(self.args.n_layers):
+            ee_index = 0
+            for i in range(len(self.args.ee_pos)):
                 loss_p = weighted_loss[i] * torch.nn.functional.cross_entropy(
-                                    exits[0, :shape_ee[0], i].view(shape_ee[0], 2),
-                                    diff[0, :, i].view(-1)
+                                    exits[0, :shape_ee[0], ee_index].view(shape_ee[0], 2),
+                                    diff[0, :, ee_index].view(-1)
                                     )
                 losses.append(loss_p)
                 # loss += loss_p
+                ee_index += 1
 
             # print(losses)
             
@@ -427,44 +428,48 @@ class Transformer(nn.Module):
 
         self.intermediate_states[0, sum(seqlens) - 1] = h.detach()
 
+        ee_index = 0
         for i, layer in enumerate(self.layers):
 
-            h, ee = layer.forward_inference(h, freqs_cis, use_EE = use_EE)
+            h = layer.forward_inference(h, freqs_cis)
 
-            if use_EE:
+            if use_EE and i in self.args.ee_pos:
 
-                ee = torch.nn.functional.softmax(ee[0], dim = 0)
-                ind = torch.argmax(ee)
+                ee = self.ee[ee_index](h)
 
-                if ind == 1 and i < self.args.n_layers - 1:
+                ee_sm = torch.nn.functional.softmax(ee[0], dim = 0)
+                ind = ee_sm[1] > self.th[ee_index]
 
-                    if ee[ind] > self.th[i]:
-                        print("Early exit at layer:", i + 1, " position:", sum(seqlens))
+                if ind and i < self.args.n_layers - 1:
+
+                    print("Early exit at layer:", i + 1, " position:", sum(seqlens))
+                    
+                    if not hasattr(self, 'exits_done'):
+                        self.exits_done = []
+
+                    self.exits_done.append(i + 1)
+
+                    # propagate intermediate states
+                    for j in range(i+1, self.args.n_layers):
+
+                        norm_x = self.layers[j].attention_norm(h)
+                        k = self.layers[j].attention.wk(norm_x)
+                        v = self.layers[j].attention.wv(norm_x)
+
+                        # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
+                        # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
+
+                        self.layers[j].attention.k[sum(seqlens) - 1] = k.view(self.args.n_kv_heads, self.args.head_dim)
+                        self.layers[j].attention.v[sum(seqlens) - 1] = v.view(self.args.n_kv_heads, self.args.head_dim)
+
+                        # self.intermediate_states[0, j+1, pos - 1] = x.detach()
+                        # self.intermediate_states[0, j+1, pos - 1] = x.detach()
                         
-                        if not hasattr(self, 'exits_done'):
-                            self.exits_done = []
+                    h = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
 
-                        self.exits_done.append(i + 1)
-
-                        # propagate intermediate states
-                        for j in range(i+1, self.args.n_layers):
-
-                            norm_x = self.layers[j].attention_norm(h)
-                            k = self.layers[j].attention.wk(norm_x)
-                            v = self.layers[j].attention.wv(norm_x)
-
-                            # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
-                            # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
-
-                            self.layers[j].attention.k[sum(seqlens) - 1] = k.view(self.args.n_kv_heads, self.args.head_dim)
-                            self.layers[j].attention.v[sum(seqlens) - 1] = v.view(self.args.n_kv_heads, self.args.head_dim)
-
-                            # self.intermediate_states[0, j+1, pos - 1] = x.detach()
-                            # self.intermediate_states[0, j+1, pos - 1] = x.detach()
-                            
-                        h, _ = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
-
-                        break
+                    break
+                    
+                ee_index += 1
                 
             self.intermediate_states[i+1, sum(seqlens) - 1] = h.detach()
 

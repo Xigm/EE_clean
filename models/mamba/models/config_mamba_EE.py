@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
 
-from typing import Optional
-
 
 @dataclass
 class MambaConfig:
@@ -18,5 +16,3 @@ class MambaConfig:
     fused_add_norm: bool = True
     pad_vocab_size_multiple: int = 8
     tie_embeddings: bool = True
-
-    ee_pos: Optional[list[int]] = None

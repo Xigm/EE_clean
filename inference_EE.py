@@ -9,17 +9,23 @@ from mistral_common.tokens.instruct.request import InstructRequest
 from mistral_common.protocol.instruct.messages import UserMessage
 from models.mistral.model_EE import Transformer, ModelArgs
 
+from models.mamba.models.wrapper_mamba_EE import Mamba
+from models.mamba.mistral_inference.args import MambaArgs
+
 import json
 import tiktoken
 
-model_choice = "gpt2"
+model_choice = "mistral"
 tokens_generated = 100
 size = "350" # 124M, 350M, 774M, 1558M
 # path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
-path = f"./weights/gpt2/gpt2"
-path_weigths_EE = path + f"/EE_1_layers_middle_2"
+# path = f"./weights/mamba"
+# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
+path = f"./weights/mistral"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_20"
 plot_intermediate_states = True
-th_for_EE = 0.99
+th_for_EE = 0.9
+ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
 
 if model_choice == "gpt2":
     
@@ -48,15 +54,39 @@ elif model_choice == "mistral":
     with open(path+ "/params.json") as f:
         args = ModelArgs(**dict(json.load(f)))
         args.lora.enable = False
+        args.ee_pos = ee_pos
         model = Transformer(args).to(torch.bfloat16).to("cuda")
     model.from_pretrained(path + "/consolidated.safetensors")
     n_layer = model.args.n_layers
+
+elif model_choice == "mamba":
+    path = "./weights/mamba/mamba-codestral-7B-v0.1/"
+
+
+    with open(path + "params.json", "r") as f:
+        model_args = MambaArgs.from_dict(json.load(f))
+        print(model_args)
+
+    model_args.ee_pos = ee_pos
+
+    model = Mamba(model_args)
+    # model.to("cuda")
+
+    import time
+    start_time = time.time()
+    model.from_folder("./weights/mamba/mamba-codestral-7B-v0.1")
+    print(f"Time to load model: {time.time() - start_time}")
+
+    start_time = time.time()
+    model.to("cuda")
+    print(f"Time to load model to GPU: {time.time() - start_time}")
+    n_layer = model_args.n_layers
 
 if model_choice == "gpt2":
     enc = tiktoken.get_encoding("gpt2")
     encode = lambda s: torch.tensor(enc.encode(s, allowed_special={"<|endoftext|>"}))[None, :]
     decode = lambda l: enc.decode(l[0,:].tolist())
-if model_choice == "mistral":
+if model_choice == "mistral" or model_choice == "mamba":
     enc = MistralTokenizer.v3().instruct_tokenizer
     createMsg = lambda s: InstructRequest(messages = [UserMessage(role = "user", content = s)])
     encode = lambda s: torch.tensor(enc.encode_instruct(createMsg(s)).tokens, device = "cuda")
@@ -69,8 +99,11 @@ if model_choice == "gpt2":
     for i in range(n_layer - 1):
         model.transformer.h[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 elif model_choice == "mistral":
-    for i in range(n_layer - 1):
-        model.layers[i].ee.load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
+    for i in range(len(ee_pos)):
+        model.ee[i].load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
+elif model_choice == "mamba":
+    for i in range(len(ee_pos)):
+        model.model.backbone.ee[i].load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
 inputs = "A rose is a type of flower that"
 
@@ -86,9 +119,13 @@ with torch.no_grad():
 
 h_states_EE = model.intermediate_states
 
-print(decode(output2))
+output_text = decode(output2)
 
 exits_done = model.exits_done
+
+# capitalize words in exits
+output_text = " ".join([word.capitalize() if i in exits_done else word for i, word in enumerate(output_text.split())])
+print(output_text)
 
 # sum 1 if we use last block
 saved = sum([n_layer - e - 1 for e in exits_done])
@@ -98,8 +135,8 @@ print(f"EEs saved {100*saved/(n_layer*tokens_generated)}% computation")
 if plot_intermediate_states:
 
     # states to cpu
-    h_states = h_states.cpu()[0]
-    h_states_EE = h_states_EE.cpu()[0]
+    h_states = h_states.cpu()
+    h_states_EE = h_states_EE.cpu()
 
     # compute the diff between state i and i+1
     norm_dif = h_states[1:] - h_states[:-1]

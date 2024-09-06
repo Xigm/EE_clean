@@ -38,3 +38,5 @@ class ModelArgs(Serializable):
 
     lora: LoraArgs = field(default_factory=LoraArgs)
     moe: Optional[MoeArgs] = None
+
+    ee_pos: Optional[list[int]] = None

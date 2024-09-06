@@ -45,5 +45,7 @@ class MambaArgs(Serializable):
     tie_embeddings: bool
     model_type: str = "mamba"
 
+    block_size: Optional[int] = None
+
     def __post_init__(self):
         assert self.model_type == "mamba", self.model_type

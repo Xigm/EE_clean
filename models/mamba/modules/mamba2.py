@@ -160,7 +160,11 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
         Returns: same shape as u
         """
         seqlen_og = seqlen
-        if seqlen is None:
+        if seqlen is None and len(u.shape) == 2:
+            seqlen, dim = u.shape
+            batch = 1
+            u.unsqueeze_(0)
+        elif seqlen is None:
             batch, seqlen, dim = u.shape
         else:
             batch_seqlen, dim = u.shape
