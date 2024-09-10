@@ -446,8 +446,11 @@ class Transformer(nn.Module):
                     
                     if not hasattr(self, 'exits_done'):
                         self.exits_done = []
+                    if not hasattr(self, 'positions_exit'):
+                        self.positions_exit = []
 
                     self.exits_done.append(i + 1)
+                    self.positions_exit.append(sum(seqlens))
 
                     # propagate intermediate states
                     for j in range(i+1, self.args.n_layers):

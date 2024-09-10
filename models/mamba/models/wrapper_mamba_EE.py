@@ -13,7 +13,7 @@ from collections import namedtuple
 
 _is_mamba_installed = False
 try:
-    from mamba_ssm.models.config_mamba import MambaConfig
+    from models.mamba.models.config_mamba import MambaConfig
     from models.mamba.models.mixer_seq_simple_EE import MambaLMHeadModel
 
     _is_mamba_installed = True
@@ -49,9 +49,12 @@ class Mamba(ModelBase, nn.Module):
 
         config.ee_pos = args.ee_pos
 
+        self.intermediate_states = torch.zeros(args.n_layers + 1, args.block_size, args.dim, device = 'cuda')
+
         self.th = torch.ones(len(args.ee_pos))
 
         self.model = MambaLMHeadModel(config)
+
 
     @property
     def dtype(self) -> torch.dtype:
@@ -217,14 +220,25 @@ class Mamba(ModelBase, nn.Module):
         seqlens: List[int] = None,  # not supported for now
         cache = None,  # not supported for now
         num_last_tokens=0,
+        load_cache = False,
         use_EE = False,
     ) -> torch.Tensor:
 
         hidden_states = self.model.backbone.embedding(input_ids)
+
+
+
+        self.intermediate_states[0, :sum(seqlens)] = hidden_states.detach()
+
         residual = None
         ee_index = 0
         for i, layer in enumerate(self.model.backbone.layers):
-            hidden_states, residual = layer(
+
+            if load_cache:
+                conv_state, ssm_state = layer.allocate_inference_cache(self, 1, self.args.max_seqlen)
+                self.inferece_params[i] = (conv_state, ssm_state)
+
+            hidden_states, residual = layer.step(
                 hidden_states, residual, inference_params=None
             )
 
@@ -235,12 +249,25 @@ class Mamba(ModelBase, nn.Module):
             if use_EE and i in self.args.ee_pos:
                 input_ee = torch.cat((hidden_states, residual), dim = 2)
                 shape_ee = input_ee.shape
-                ee = self.model.backbone.ee[ee_index].forward(input_ee)
+                ee = torch.nn.functional.softmax(self.model.backbone.ee[ee_index].forward(input_ee).squeeze(), dim = 0)
+
+                if ee[1] > self.th[ee_index]:
+                    print("Early exit at layer:", i + 1)
+
+                    if not hasattr(self, 'exits_done'):
+                        self.exits_done = []
+                    if not hasattr(self, 'positions_exit'):
+                        self.positions_exit = []
+
+                    self.exits_done.append(i + 1)
+                    self.positions_exit.append(sum(seqlens))
+
+                    break  
+                    
                 ee_index += 1
 
-                if ee[0] > self.th[i]:
-                    print("Early exit at layer:", i + 1)
-                    break          
+            
+            self.intermediate_states[i+1, :sum(seqlens)] = hidden_states.detach()
 
         hidden_states = self.apply_layer_norm_fn(hidden_states, residual)
 
@@ -248,50 +275,8 @@ class Mamba(ModelBase, nn.Module):
             hidden_states = hidden_states[:, -num_last_tokens:]
         lm_logits = self.model.lm_head(hidden_states) 
 
-       
 
-        for i, layer in enumerate(self.layers):
-
-            h, ee = layer.forward_inference(h, freqs_cis, use_EE = use_EE)
-
-            if use_EE:
-
-                ee = torch.nn.functional.softmax(ee[0], dim = 0)
-                ind = torch.argmax(ee)
-
-                if ind == 1 and i < self.args.n_layers - 1:
-
-                    if ee[ind] > self.th[i]:
-                        print("Early exit at layer:", i + 1, " position:", sum(seqlens))
-                        
-                        if not hasattr(self, 'exits_done'):
-                            self.exits_done = []
-
-                        self.exits_done.append(i + 1)
-
-                        # propagate intermediate states
-                        for j in range(i+1, self.args.n_layers):
-
-                            norm_x = self.layers[j].attention_norm(h)
-                            k = self.layers[j].attention.wk(norm_x)
-                            v = self.layers[j].attention.wv(norm_x)
-
-                            # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
-                            # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
-
-                            self.layers[j].attention.k[sum(seqlens) - 1] = k.view(self.args.n_kv_heads, self.args.head_dim)
-                            self.layers[j].attention.v[sum(seqlens) - 1] = v.view(self.args.n_kv_heads, self.args.head_dim)
-
-                            # self.intermediate_states[0, j+1, pos - 1] = x.detach()
-                            # self.intermediate_states[0, j+1, pos - 1] = x.detach()
-                            
-                        h, _ = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
-
-                        break
-                
-            self.intermediate_states[i+1, sum(seqlens) - 1] = h.detach()
-
-        return self.output(self.norm(h)).float()
+        return lm_logits
 
             
         # if use_EE and i in self.args.ee_pos:
@@ -337,9 +322,30 @@ class Mamba(ModelBase, nn.Module):
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
-        for _ in range(max_new_tokens):
+
+        # COLD start
+        pos = idx.shape[0]
+        logits, _, _ = self(idx, train_EE = False) # just to make sure the model is in the right shape
+
+        logits = logits[0, -1, :] / temperature
+        
+        # optionally crop the logits to only the top k options
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[[-1]]] = -float('Inf')
+
+        # apply softmax to convert logits to (normalized) probabilities
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        # sample from the distribution
+        idx_next = torch.multinomial(probs, num_samples=1)
+        # append sampled index to the running sequence and continue
+        idx = torch.cat((idx, idx_next), dim = 0)
+
+        pos += 1
+
+        for i in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self(idx, use_EE = use_EE)
+            logits = self.forward_inference(idx, use_EE = use_EE, seqlens = [len(idx)])
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[0, -1, :] / temperature
             # optionally crop the logits to only the top k options
@@ -351,7 +357,8 @@ class Mamba(ModelBase, nn.Module):
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
             # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next[None,:]), dim = 1)
+            idx = torch.cat((idx, idx_next))
+
 
         return idx
 

@@ -31,7 +31,7 @@ size = "350" # 124M, 350M, 774M, 1558M
 path = f"./weights/gpt2/gpt2"
 path_weigths_EE = path + f"./EE_1_layers_middle_2"
 
-ee_pos = [32, 40, 48, 56]
+ee_pos = [32, 50]
 
 if model_choice == "gpt2":
     
@@ -74,6 +74,7 @@ elif model_choice == "mamba":
         print(model_args)
 
     model_args.ee_pos = ee_pos
+    model_args.block_size = 1024*4
 
     model = Mamba(model_args)
     # model.to("cuda")

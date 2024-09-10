@@ -20,3 +20,4 @@ class MambaConfig:
     tie_embeddings: bool = True
 
     ee_pos: Optional[list[int]] = None
+    block_size: Optional[int] = None

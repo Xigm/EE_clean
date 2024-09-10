@@ -15,14 +15,14 @@ from models.mamba.mistral_inference.args import MambaArgs
 import json
 import tiktoken
 
-model_choice = "mistral"
+model_choice = "mamba"
 tokens_generated = 100
 size = "350" # 124M, 350M, 774M, 1558M
 # path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
-# path = f"./weights/mamba"
-# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
-path = f"./weights/mistral"
-path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_20"
+path = f"./weights/mamba"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_50"
+# path = f"./weights/mistral"
+# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_25"
 plot_intermediate_states = True
 th_for_EE = 0.9
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
@@ -68,6 +68,7 @@ elif model_choice == "mamba":
         print(model_args)
 
     model_args.ee_pos = ee_pos
+    model_args.block_size = 1024*4
 
     model = Mamba(model_args)
     # model.to("cuda")
@@ -105,7 +106,7 @@ elif model_choice == "mamba":
     for i in range(len(ee_pos)):
         model.model.backbone.ee[i].load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
-inputs = "A rose is a type of flower that"
+inputs = "What can you tell me about flowers?"
 
 with torch.no_grad():
     output1 = model.generate(encode(inputs).to("cuda"), temperature=1e-6, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
@@ -122,9 +123,10 @@ h_states_EE = model.intermediate_states
 output_text = decode(output2)
 
 exits_done = model.exits_done
+positions_exit = model.positions_exit
 
 # capitalize words in exits
-output_text = " ".join([word.capitalize() if i in exits_done else word for i, word in enumerate(output_text.split())])
+output_text = " ".join([word.upper() if i in positions_exit else word for i, word in enumerate(output_text.split())])
 print(output_text)
 
 # sum 1 if we use last block

@@ -164,6 +164,9 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
             seqlen, dim = u.shape
             batch = 1
             u.unsqueeze_(0)
+        elif seqlen is None and len(u.shape) == 1:
+            batch, seqlen = 1, 1
+            u.unsqueeze_(0).unsqueeze_(0)
         elif seqlen is None:
             batch, seqlen, dim = u.shape
         else:
