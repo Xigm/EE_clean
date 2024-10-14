@@ -15,8 +15,8 @@ import torch
 from torch.functional import F
 from tqdm import tqdm
 
-@register_model("mistral7b")
-class Mistral_7b(TemplateLM):
+@register_model("mamba7b")
+class Mamba_7b(TemplateLM):
     def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, device = "cuda"):
         
         # set rank and world size to a single process, by default.
@@ -64,27 +64,27 @@ class Mistral_7b(TemplateLM):
             positions = [len(inputs)]
             return self.model(inputs, positions, **kwargs)
 
-    def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
+    # def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
         
-        # inputs, args = requests.args
-        # max_tokens = args["max_log_toks"]
-        # res, _ = generate(inputs, self.model, self.tokenizer, max_tokens)
+    #     # inputs, args = requests.args
+    #     # max_tokens = args["max_log_toks"]
+    #     # res, _ = generate(inputs, self.model, self.tokenizer, max_tokens)
 
-        # check number of reqs
-        n_reqs = len(requests)
-        n_batches = n_reqs // self.batch_size +1
-        reqs = [requests[i*self.batch_size:(i+1)*self.batch_size] for i in range(n_batches)]
+    #     # check number of reqs
+    #     n_reqs = len(requests)
+    #     n_batches = n_reqs // self.batch_size +1
+    #     reqs = [requests[i*self.batch_size:(i+1)*self.batch_size] for i in range(n_batches)]
 
-        out = []
-        for req in reqs:
-            inputs = [r[0][0] for r in req]
-            targets = [r[2] for r in req]
+    #     out = []
+    #     for req in reqs:
+    #         inputs = [r[0][0] for r in req]
+    #         targets = [r[2] for r in req]
             
-            _, logs = generate(inputs, self.model, self.tokenizer, 1)
+    #         _, logs = generate(inputs, self.model, self.tokenizer, 1)
 
-            out.append(logs[targets])
+    #         out.append(logs[targets])
 
-        return out
+    #     return out
 
     def _loglikelihood_tokens(
         self,
@@ -197,7 +197,7 @@ class Mistral_7b(TemplateLM):
             call_kwargs = {}
             batched_inps = pad_and_concat(
                 padding_len_inp, inps, padding_side="right"
-            )  # [batch, padding_len_inp]
+            ).unsqueeze(0)  # [batch, padding_len_inp]
 
             multi_logits = F.log_softmax(
                 self._model_call(batched_inps, **call_kwargs)[0], dim=-1
@@ -213,10 +213,10 @@ class Mistral_7b(TemplateLM):
                 # also discards + checks for "virtual tokens" in the causal LM's input window
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
-                    inplen + (logits.shape[0] - padding_len_inp)
+                    inplen + (logits.shape[1] - padding_len_inp)
                 )
-                logits = logits[ctx_len - contlen : ctx_len]
-                logits = logits.unsqueeze(0)  # [1, seq, vocab]
+                logits = logits[:1,ctx_len - contlen : ctx_len]
+                # logits = logits.unsqueeze(0)  # [1, contlen, vocab]
 
                 # Check if per-token argmax is exactly equal to continuation
                 greedy_tokens = logits.argmax(dim=-1)
@@ -239,7 +239,9 @@ class Mistral_7b(TemplateLM):
 
                     # Obtain log-probs at the corresponding continuation token indices
                     # last_token_slice = logits[:, -1, :]
+                    # logits here are [1, contlen, vocab]
                     logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1))
+                    # logits = torch.gather(logits.squeeze(0), 1, cont_toks)
                     logits = logits.squeeze(-1)  # [1, seq]
 
                     # Answer: (log prob, is-exact-match)

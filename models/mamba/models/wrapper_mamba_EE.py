@@ -51,9 +51,15 @@ class Mamba(ModelBase, nn.Module):
 
         self.intermediate_states = torch.zeros(args.n_layers + 1, args.block_size, args.dim, device = 'cuda')
 
-        self.th = torch.ones(len(args.ee_pos))
+        self.th = torch.ones(len(args.ee_pos)) if args.ee_pos is not None else None
 
         self.model = MambaLMHeadModel(config)
+
+        inference_params = namedtuple('inference_params', ['key_value_memory_dict', 'seqlen_offset'])
+
+        params = inference_params({}, 0)
+
+        self.inference_params =  params
 
 
     @property
@@ -212,7 +218,7 @@ class Mamba(ModelBase, nn.Module):
 
         else:
                    
-            return lm_logits, None, None
+            return lm_logits
 
     def forward_inference(
         self,
@@ -223,36 +229,41 @@ class Mamba(ModelBase, nn.Module):
         load_cache = False,
         use_EE = False,
     ) -> torch.Tensor:
+        
 
         hidden_states = self.model.backbone.embedding(input_ids)
 
-
-
-        self.intermediate_states[0, :sum(seqlens)] = hidden_states.detach()
+        # if not load_cache:
+        #     self.intermediate_states[0, sum(seqlens)] = hidden_states.detach()
 
         residual = None
         ee_index = 0
         for i, layer in enumerate(self.model.backbone.layers):
 
             if load_cache:
-                conv_state, ssm_state = layer.allocate_inference_cache(self, 1, self.args.max_seqlen)
-                self.inferece_params[i] = (conv_state, ssm_state)
+                conv_state, ssm_state = layer.allocate_inference_cache(1, self.args.block_size)
+                self.inference_params.key_value_memory_dict[i] = (conv_state, ssm_state)
 
-            hidden_states, residual = layer.step(
-                hidden_states, residual, inference_params=None
+            
+            hidden_states, residual = layer(
+                hidden_states, residual, inference_params=self.inference_params
             )
 
             # little patch
-            if len(hidden_states.shape) != len(residual.shape):
+            if 2 == len(residual.shape):
                 residual.unsqueeze_(0)
+            elif 1 == len(residual.shape):
+                residual.unsqueeze_(0).unsqueeze_(0)
+
+            
+            input_ee = torch.cat((hidden_states, residual), dim = 2)
 
             if use_EE and i in self.args.ee_pos:
-                input_ee = torch.cat((hidden_states, residual), dim = 2)
-                shape_ee = input_ee.shape
+                
                 ee = torch.nn.functional.softmax(self.model.backbone.ee[ee_index].forward(input_ee).squeeze(), dim = 0)
 
                 if ee[1] > self.th[ee_index]:
-                    print("Early exit at layer:", i + 1)
+                    # print("Early exit at layer:", i + 1, " for token:", sum(seqlens))
 
                     if not hasattr(self, 'exits_done'):
                         self.exits_done = []
@@ -263,11 +274,13 @@ class Mamba(ModelBase, nn.Module):
                     self.positions_exit.append(sum(seqlens))
 
                     break  
+
+                    # pass
                     
                 ee_index += 1
 
-            
-            self.intermediate_states[i+1, :sum(seqlens)] = hidden_states.detach()
+            # if not load_cache:
+            #     self.intermediate_states[i+1, sum(seqlens)] = hidden_states.detach()
 
         hidden_states = self.apply_layer_norm_fn(hidden_states, residual)
 
@@ -316,16 +329,21 @@ class Mamba(ModelBase, nn.Module):
         # self.to(device=device, dtype=dtype)
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 1., use_EE = False, until = None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
 
+        if until is not None:
+            len_until = len(until)
+
         # COLD start
-        pos = idx.shape[0]
-        logits, _, _ = self(idx, train_EE = False) # just to make sure the model is in the right shape
+        pos_prompt = idx.shape[0]
+        logits = self.forward_inference(idx, seqlens = [pos_prompt], use_EE = False) # just to make sure the model is in the right shape
+
+        # logits = self(idx, seqlens = [pos])
 
         logits = logits[0, -1, :] / temperature
         
@@ -341,13 +359,34 @@ class Mamba(ModelBase, nn.Module):
         # append sampled index to the running sequence and continue
         idx = torch.cat((idx, idx_next), dim = 0)
 
-        pos += 1
+        pos = pos_prompt + 1
+
+        inference_params = namedtuple('inference_params', ['key_value_memory_dict', 'seqlen_offset'])
+
+        params = inference_params(self.inference_params.key_value_memory_dict, pos)
+
+        self.inference_params = params
 
         for i in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx, use_EE = use_EE, seqlens = [len(idx)])
+            logits = self.forward_inference(idx[-1], use_EE = use_EE, seqlens = [len(idx)])
             # pluck the logits at the final step and scale by desired temperature
-            logits = logits[0, -1, :] / temperature
+            logits = logits[0, -1, :] 
+            
+            # apply repetition penalty
+            if repetition_penalty != 0:
+                apply_pen_tokens = torch.where(idx > 894)[0]
+                len_mask = len(apply_pen_tokens)
+                mask = torch.flip(torch.exp(-torch.arange(len_mask, device = "cuda", dtype = logits.dtype)), dims = (0,)) / (repetition_penalty**2)
+                logits[idx[apply_pen_tokens]] = logits[idx[apply_pen_tokens]] * mask
+
+                # we will just square the penalty in the mask
+                
+                # where = torch.zeros(logits.shape, device = "cuda", dtype=torch.bool)
+                # where[idx[apply_pen_tokens]] = True
+                # logits = torch.where(where, logits, logits * repetition_penalty) 
+            
+            logits = logits/ temperature
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
@@ -359,6 +398,13 @@ class Mamba(ModelBase, nn.Module):
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next))
 
+            if until is not None:
+                if torch.equal(idx[-len_until:], until):
+                    break
+
+        if not hasattr(self, 'lens_generated'):
+            self.lens_generated = []
+        self.lens_generated.append(idx.shape[0] - pos_prompt)
 
         return idx
 

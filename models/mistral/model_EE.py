@@ -273,6 +273,8 @@ class Transformer(nn.Module):
 
         self.k = 1
 
+        self.recompute_states = False
+
     @property
     def dtype(self) -> torch.dtype:
         return self.tok_embeddings.weight.dtype
@@ -442,7 +444,7 @@ class Transformer(nn.Module):
 
                 if ind and i < self.args.n_layers - 1:
 
-                    print("Early exit at layer:", i + 1, " position:", sum(seqlens))
+                    # print("Early exit at layer:", i + 1, " position:", sum(seqlens))
                     
                     if not hasattr(self, 'exits_done'):
                         self.exits_done = []
@@ -455,16 +457,19 @@ class Transformer(nn.Module):
                     # propagate intermediate states
                     for j in range(i+1, self.args.n_layers):
 
-                        norm_x = self.layers[j].attention_norm(h)
-                        k = self.layers[j].attention.wk(norm_x)
-                        v = self.layers[j].attention.wv(norm_x)
+                        if self.recompute_states:
+                            norm_x = self.layers[j].attention_norm(h)
+                            k = self.layers[j].attention.wk(norm_x)
+                            v = self.layers[j].attention.wv(norm_x)
 
-                        # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
-                        # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
+                            # self.transformer.h[j].attn.k[:,pos] = self.transformer.h[i].attn.k[:,pos]
+                            # self.transformer.h[j].attn.v[:,pos] = self.transformer.h[i].attn.v[:,pos]
 
-                        self.layers[j].attention.k[sum(seqlens) - 1] = k.view(self.args.n_kv_heads, self.args.head_dim)
-                        self.layers[j].attention.v[sum(seqlens) - 1] = v.view(self.args.n_kv_heads, self.args.head_dim)
-
+                            self.layers[j].attention.k[sum(seqlens) - 1] = k.view(self.args.n_kv_heads, self.args.head_dim)
+                            self.layers[j].attention.v[sum(seqlens) - 1] = v.view(self.args.n_kv_heads, self.args.head_dim)
+                        else:
+                            self.layers[j].attention.k[sum(seqlens) - 1] = self.layers[j].attention.k[sum(seqlens) - 2]
+                            self.layers[j].attention.v[sum(seqlens) - 1] = self.layers[j].attention.v[sum(seqlens) - 2]
                         # self.intermediate_states[0, j+1, pos - 1] = x.detach()
                         # self.intermediate_states[0, j+1, pos - 1] = x.detach()
                         
@@ -479,14 +484,20 @@ class Transformer(nn.Module):
         return self.output(self.norm(h)).float()
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
+
+        self.recompute_states = recompute_states
+
+        if until is not None:
+            len_until = len(until)
+
         # COLD start
-        pos = idx.shape[0]
+        pos_prompt = idx.shape[0]
         logits, _, _ = self(idx, load_caches = True) # just to make sure the model is in the right shape
 
         logits = logits[-1, :] / temperature
@@ -502,7 +513,7 @@ class Transformer(nn.Module):
         # append sampled index to the running sequence and continue
         idx = torch.cat((idx, idx_next))
 
-        pos += 1
+        pos = pos_prompt + 1
 
         for _ in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
@@ -520,6 +531,14 @@ class Transformer(nn.Module):
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next))
 
+            if until is not None:
+                if torch.equal(idx[-len_until:], until):
+                    break
+
+        if not hasattr(self, 'lens_generated'):
+            self.lens_generated = []
+        self.lens_generated.append(idx.shape[0] - pos_prompt)
+        
         return idx
 
 

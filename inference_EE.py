@@ -15,17 +15,18 @@ from models.mamba.mistral_inference.args import MambaArgs
 import json
 import tiktoken
 
-model_choice = "mamba"
-tokens_generated = 100
+model_choice = "mamba" # gpt2, mistral, mamba
+tokens_generated = 50
 size = "350" # 124M, 350M, 774M, 1558M
 # path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
 path = f"./weights/mamba"
-path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_50"
-# path = f"./weights/mistral"
-# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_25"
-plot_intermediate_states = True
-th_for_EE = 0.9
+path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
+# path = f"./weights/mamba"
+# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
+plot_intermediate_states = False
+th_for_EE = 0.5
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
+# ee_pos = None
 
 if model_choice == "gpt2":
     
@@ -94,7 +95,7 @@ if model_choice == "mistral" or model_choice == "mamba":
     decode = lambda l: enc.decode(l.tolist())
 
 
-model.th = model.th * th_for_EE
+model.th = model.th * th_for_EE if ee_pos is not None else None
 
 if model_choice == "gpt2":
     for i in range(n_layer - 1):
@@ -108,17 +109,24 @@ elif model_choice == "mamba":
 
 inputs = "What can you tell me about flowers?"
 
+print("\n")
+
 with torch.no_grad():
     output1 = model.generate(encode(inputs).to("cuda"), temperature=1e-6, max_new_tokens=tokens_generated, top_k = 10, use_EE = False)
 
-h_states = model.intermediate_states.clone()
+if plot_intermediate_states:
+    h_states = model.intermediate_states.clone()
 
 print(decode(output1))
 
+if model_choice == "mamba":
+    model.inference_params["sequence_length"] = 0
+    
 with torch.no_grad():
     output2 = model.generate(encode(inputs).to("cuda"), temperature=1e-6, max_new_tokens=tokens_generated, top_k = 10, use_EE = True)
 
-h_states_EE = model.intermediate_states
+if plot_intermediate_states:
+    h_states_EE = model.intermediate_states
 
 output_text = decode(output2)
 
@@ -130,7 +138,10 @@ output_text = " ".join([word.upper() if i in positions_exit else word for i, wor
 print(output_text)
 
 # sum 1 if we use last block
-saved = sum([n_layer - e - 1 for e in exits_done])
+if model_choice == "mistral":
+    saved = sum([n_layer - e - 1 for e in exits_done])
+elif model_choice == "mamba":
+    saved = sum([n_layer - e for e in exits_done])
 
 print(f"EEs saved {100*saved/(n_layer*tokens_generated)}% computation")
 

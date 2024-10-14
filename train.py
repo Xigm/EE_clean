@@ -25,13 +25,14 @@ from schedulefree import AdamWScheduleFree
 fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
 
 device = "cuda"
-model_choice = "mamba"
+model_choice = "mistral"
 size = "350" # 124M, 350M, 774M, 1558M
 # path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
 path = f"./weights/gpt2/gpt2"
 path_weigths_EE = path + f"./EE_1_layers_middle_2"
 
-ee_pos = [32, 50]
+# ee_pos = [32, 40, 48, 56]
+ee_pos = [16, 20, 24, 28]
 
 if model_choice == "gpt2":
     

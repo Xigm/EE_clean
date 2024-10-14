@@ -868,12 +868,51 @@ class ConfigurableTask(Task):
                     )
 
     def download(self, dataset_kwargs: Optional[Dict[str, Any]] = None) -> None:
-        self.dataset = datasets.load_dataset(
-            path=self.DATASET_PATH,
-            name=self.DATASET_NAME,
-            trust_remote_code=True,
-            **dataset_kwargs if dataset_kwargs is not None else {},
-        )
+        if dataset_kwargs is not None:
+            if "trust_remote_code" in dataset_kwargs.keys():
+                del dataset_kwargs["trust_remote_code"]
+        if self.DATASET_PATH == "story_cloze":
+            full_path = "/mnt/c/Users/usuario/Desktop/Projects/EE_clean"
+            data_files = {
+                            "validation": full_path + "/datasets/story_cloze/validation/validation.csv",
+                            "test": full_path + "/datasets/story_cloze/test/test.csv"
+                            }
+            self.dataset = datasets.load_dataset(
+                "csv",
+                # data_dir = "./datasets/story_cloze",
+                data_files = data_files,
+                # split = "test",
+                trust_remote_code=True,
+            )
+        if self.DATASET_PATH == "trivia_qa":
+            self.dataset = datasets.load_dataset(
+                path=self.DATASET_PATH,
+                name=self.DATASET_NAME,
+                trust_remote_code=True,
+                **dataset_kwargs if dataset_kwargs is not None else {},
+            )
+
+            df = self.dataset["validation"].map(
+                lambda x: {'aliases_length': len(x['answer']['aliases'][0]) if 'aliases' in x['answer'] and len(x['answer']['aliases']) > 0 else 0}
+            )
+
+            # Sort the dataset by the 'aliases_length' column in descending order
+            df = df.sort('aliases_length', reverse=True)
+
+            # Select the top 1000 rows with the longest 'aliases'
+            df = df.select(range(1000,2000))
+
+            # Remove the 'aliases_length' column if not needed anymore
+            self.dataset["validation"] = df.remove_columns(['aliases_length'])
+        else:
+            # if type(self.DATASET_NAME) is int:
+            #     self.DATASET_NAME = str(self.DATASET_NAME)
+            self.dataset = datasets.load_dataset(
+                path=self.DATASET_PATH,
+                name=self.DATASET_NAME,
+                trust_remote_code=True,
+                **dataset_kwargs if dataset_kwargs is not None else {},
+            )
 
     def has_training_docs(self) -> bool:
         if self.config.training_split is not None:

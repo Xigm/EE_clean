@@ -11,6 +11,7 @@ import sklearn.metrics
 
 from lm_eval.api.registry import register_aggregation, register_metric
 
+import re
 
 eval_logger = logging.getLogger("lm-eval")
 

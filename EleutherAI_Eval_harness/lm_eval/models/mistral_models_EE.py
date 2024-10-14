@@ -15,9 +15,14 @@ import torch
 from torch.functional import F
 from tqdm import tqdm
 
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+from mistral_common.tokens.instruct.request import InstructRequest
+from mistral_common.protocol.instruct.messages import UserMessage
+
+
 @register_model("mistral7b")
 class Mistral_7b(TemplateLM):
-    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, device = "cuda"):
+    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, temperature = 1.0, top_k = None, use_EE = None, device = "cuda", recompute_states = False):
         
         # set rank and world size to a single process, by default.
         self._rank = 0
@@ -34,6 +39,12 @@ class Mistral_7b(TemplateLM):
 
         self.device = device
 
+        self.inference_params = {   
+                                    "temperature" : temperature,
+                                    "top_k" : top_k,
+                                    "use_EE" : use_EE,
+                                    "recompute_states" : recompute_states
+                                }
 
     def tok_encode(self, string: str, **kwargs):
         out = self.tokenizer.encode(string)
@@ -51,10 +62,11 @@ class Mistral_7b(TemplateLM):
         out = self.tokenizer._model.decode(tokens)
         return out
     
-    def _model_generate(self, context, until):
+    def _model_generate(self, context, until, inference_params = None):
         with torch.no_grad():
-            return self._generate(context, model = self.model, tokenizer = self.tokenizer, until = until, max_tokens = self.max_gen_toks)
-    
+            res = self._generate(context, model = self.model, tokenizer = self.tokenizer, until = until, max_tokens = self.max_gen_toks, inference_params=inference_params)
+            return [res]
+        
     def _model_call(self, inputs, **kwargs):
         with torch.no_grad():
             positions = torch.arange(inputs.size(1), device=inputs.device)
@@ -62,7 +74,9 @@ class Mistral_7b(TemplateLM):
             inputs = inputs[0]
 
             positions = [len(inputs)]
-            return self.model(inputs, positions, **kwargs)
+            outputs = self.model(inputs, positions,**kwargs)
+
+            return outputs[0]
 
     def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
         
@@ -200,7 +214,7 @@ class Mistral_7b(TemplateLM):
             )  # [batch, padding_len_inp]
 
             multi_logits = F.log_softmax(
-                self._model_call(batched_inps, **call_kwargs)[0], dim=-1
+                self._model_call(batched_inps, **call_kwargs), dim=-1
             ).unsqueeze(0)  # [batch, padding_length (inp or cont), vocab]
 
             for (request_str, ctx_tokens, _), logits, inplen, cont_toks in zip(
@@ -361,18 +375,21 @@ class Mistral_7b(TemplateLM):
             #     kwargs["max_length"] = context_enc.shape[1] + max_gen_toks
 
             # perform batched generation
-            if not kwargs["do_sample"]:
-                cont_texts = self._model_generate(
-                    context=contexts,
-                    until=until
-                )
-            else:
-                assert False, "Sampling not supported"
+            cont_texts = self._model_generate(
+                context=contexts,
+                until=until,
+                inference_params=self.inference_params
+            )
 
             # cont_toks_list = cont_text.tolist()
             for cont_text, context in zip(cont_texts, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                s = cont_text[len(context):].split("\n\n")[0]
+                # s = cont_text[len(context):].split("\n\n")[0]
+
+                if "\n" in cont_text:
+                    s = cont_text.split("\n")[0]
+                else:
+                    s = cont_text[0]
 
                 # s = self.tok_decode(cont_toks)
 
@@ -405,7 +422,7 @@ class Mistral_7b(TemplateLM):
         return self.eot_token_id
     
     @torch.no_grad()
-    def _generate(self, prompts: list[str], model, tokenizer, until, max_tokens: int):
+    def _generate(self, prompts: list[str], model, tokenizer, until, max_tokens: int, inference_params = None):
         # encoded_prompts = [tokenizer.encode(prompt) for prompt in prompts]
         # prompt_lens = [len(x) for x in encoded_prompts]
         # min_prompt_len = min(prompt_lens)
@@ -453,9 +470,24 @@ class Mistral_7b(TemplateLM):
         #     for i, x in enumerate(encoded_prompts):
         #         res.append(tokenizer.decode(x[:min_prompt_len] + generated[i].tolist()))
 
+        encode = lambda s: torch.tensor(tokenizer.encode(s[0]), device = self.device)
+        decode = lambda l: tokenizer.decode(l.tolist())
+
+        if inference_params is None:
+            temperature = 1.0
+            top_k = None
+            use_EE = False
+            recompute_states = False
+        else:
+            recompute_states = inference_params["recompute_states"]
+            temperature = inference_params["temperature"]
+            top_k = inference_params["top_k"]
+            use_EE = inference_params["use_EE"]
+
+        enc_prompts = encode(prompts)
+        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = encode("\n")[2:], recompute_states = recompute_states)
                
-       
-       
+        res = decode(generated[len(enc_prompts):])
        
         return res
 

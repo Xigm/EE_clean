@@ -168,14 +168,15 @@ class MixerModel(nn.Module):
                 for i in range(n_layer)
             ]
         )
+        if args.ee_pos is not None:
+            self.ee_pos = args.ee_pos
+            self.ee = nn.ModuleList(
+                [
+                    EE(args) for _ in range(len(args.ee_pos))
+                ]
+            )
 
-        self.ee = nn.ModuleList(
-            [
-                EE(args) for _ in range(len(args.ee_pos))
-            ]
-        )
-
-        self.th = torch.ones(len(args.ee_pos), device = 'cuda')
+        self.th = torch.ones(args.n_layer - 1, device = 'cuda')
 
         self.k = 1
 

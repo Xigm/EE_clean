@@ -15,9 +15,12 @@ import torch
 from torch.functional import F
 from tqdm import tqdm
 
-@register_model("mistral7b")
-class Mistral_7b(TemplateLM):
-    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, device = "cuda"):
+from collections import namedtuple
+
+
+@register_model("mamba7b")
+class Mamba_7b(TemplateLM):
+    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, temperature = 1.0, top_k = None, use_EE = False, device = "cuda"):
         
         # set rank and world size to a single process, by default.
         self._rank = 0
@@ -33,6 +36,8 @@ class Mistral_7b(TemplateLM):
         self.max_length = max_length
 
         self.device = device
+
+        self.inference_params = {"temperature" : temperature, "top_k" : top_k, "use_EE" : use_EE}
 
 
     def tok_encode(self, string: str, **kwargs):
@@ -51,9 +56,10 @@ class Mistral_7b(TemplateLM):
         out = self.tokenizer._model.decode(tokens)
         return out
     
-    def _model_generate(self, context, until):
+    def _model_generate(self, context, until, inference_params = None):
         with torch.no_grad():
-            return self._generate(context, model = self.model, tokenizer = self.tokenizer, until = until, max_tokens = self.max_gen_toks)
+            res = self._generate(context, model = self.model, tokenizer = self.tokenizer, until = until, max_tokens = self.max_gen_toks, inference_params=inference_params)
+            return [res]
     
     def _model_call(self, inputs, **kwargs):
         with torch.no_grad():
@@ -64,27 +70,27 @@ class Mistral_7b(TemplateLM):
             positions = [len(inputs)]
             return self.model(inputs, positions, **kwargs)
 
-    def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
+    # def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
         
-        # inputs, args = requests.args
-        # max_tokens = args["max_log_toks"]
-        # res, _ = generate(inputs, self.model, self.tokenizer, max_tokens)
+    #     # inputs, args = requests.args
+    #     # max_tokens = args["max_log_toks"]
+    #     # res, _ = generate(inputs, self.model, self.tokenizer, max_tokens)
 
-        # check number of reqs
-        n_reqs = len(requests)
-        n_batches = n_reqs // self.batch_size +1
-        reqs = [requests[i*self.batch_size:(i+1)*self.batch_size] for i in range(n_batches)]
+    #     # check number of reqs
+    #     n_reqs = len(requests)
+    #     n_batches = n_reqs // self.batch_size +1
+    #     reqs = [requests[i*self.batch_size:(i+1)*self.batch_size] for i in range(n_batches)]
 
-        out = []
-        for req in reqs:
-            inputs = [r[0][0] for r in req]
-            targets = [r[2] for r in req]
+    #     out = []
+    #     for req in reqs:
+    #         inputs = [r[0][0] for r in req]
+    #         targets = [r[2] for r in req]
             
-            _, logs = generate(inputs, self.model, self.tokenizer, 1)
+    #         _, logs = generate(inputs, self.model, self.tokenizer, 1)
 
-            out.append(logs[targets])
+    #         out.append(logs[targets])
 
-        return out
+    #     return out
 
     def _loglikelihood_tokens(
         self,
@@ -197,7 +203,7 @@ class Mistral_7b(TemplateLM):
             call_kwargs = {}
             batched_inps = pad_and_concat(
                 padding_len_inp, inps, padding_side="right"
-            )  # [batch, padding_len_inp]
+            ).unsqueeze(0)  # [batch, padding_len_inp]
 
             multi_logits = F.log_softmax(
                 self._model_call(batched_inps, **call_kwargs)[0], dim=-1
@@ -213,10 +219,10 @@ class Mistral_7b(TemplateLM):
                 # also discards + checks for "virtual tokens" in the causal LM's input window
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
-                    inplen + (logits.shape[0] - padding_len_inp)
+                    inplen + (logits.shape[1] - padding_len_inp)
                 )
-                logits = logits[ctx_len - contlen : ctx_len]
-                logits = logits.unsqueeze(0)  # [1, seq, vocab]
+                logits = logits[:1,ctx_len - contlen : ctx_len]
+                # logits = logits.unsqueeze(0)  # [1, contlen, vocab]
 
                 # Check if per-token argmax is exactly equal to continuation
                 greedy_tokens = logits.argmax(dim=-1)
@@ -239,7 +245,9 @@ class Mistral_7b(TemplateLM):
 
                     # Obtain log-probs at the corresponding continuation token indices
                     # last_token_slice = logits[:, -1, :]
+                    # logits here are [1, contlen, vocab]
                     logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1))
+                    # logits = torch.gather(logits.squeeze(0), 1, cont_toks)
                     logits = logits.squeeze(-1)  # [1, seq]
 
                     # Answer: (log prob, is-exact-match)
@@ -361,18 +369,19 @@ class Mistral_7b(TemplateLM):
             #     kwargs["max_length"] = context_enc.shape[1] + max_gen_toks
 
             # perform batched generation
-            if not kwargs["do_sample"]:
-                cont_texts = self._model_generate(
-                    context=contexts,
-                    until=until
-                )
-            else:
-                assert False, "Sampling not supported"
+            cont_texts = self._model_generate(
+                context=contexts,
+                until=until,
+                inference_params=self.inference_params
+            )
 
             # cont_toks_list = cont_text.tolist()
             for cont_text, context in zip(cont_texts, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                s = cont_text[len(context):].split("\n\n")[0]
+                if "\n" in cont_text:
+                    s = cont_text.split("\n")[0]
+                else:
+                    s = cont_text[0]
 
                 # s = self.tok_decode(cont_toks)
 
@@ -405,7 +414,7 @@ class Mistral_7b(TemplateLM):
         return self.eot_token_id
     
     @torch.no_grad()
-    def _generate(self, prompts: list[str], model, tokenizer, until, max_tokens: int):
+    def _generate(self, prompts: list[str], model, tokenizer, until, max_tokens: int, inference_params = None):
         # encoded_prompts = [tokenizer.encode(prompt) for prompt in prompts]
         # prompt_lens = [len(x) for x in encoded_prompts]
         # min_prompt_len = min(prompt_lens)
@@ -453,9 +462,26 @@ class Mistral_7b(TemplateLM):
         #     for i, x in enumerate(encoded_prompts):
         #         res.append(tokenizer.decode(x[:min_prompt_len] + generated[i].tolist()))
 
+        encode = lambda s: torch.tensor(tokenizer.encode(s[0]), device = self.device)
+        decode = lambda l: tokenizer.decode(l.tolist())
+
+        if inference_params is None:
+            temperature = 1.0
+            top_k = None
+            use_EE = False
+        else:
+            temperature = inference_params["temperature"]
+            top_k = inference_params["top_k"]
+            use_EE = inference_params["use_EE"]
+    
+        enc_prompts = encode(prompts)
+        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = encode("\n")[2:])
                
-       
-       
+        res = decode(generated[len(enc_prompts):])
+
+        inference_params_model = namedtuple('inference_params', ['key_value_memory_dict', 'seqlen_offset'])
+        params = inference_params_model(self.model.inference_params.key_value_memory_dict, 0)
+        self.model.inference_params = params
        
         return res
 

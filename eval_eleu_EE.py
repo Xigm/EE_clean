@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.join(sys.path[0], './EleutherAI_Eval_harness'))
 
-from lm_eval.models.mistral_models import Mistral_7b
+from lm_eval.models.mistral_models_EE import Mistral_7b
 from lm_eval import evaluate, simple_evaluate
 from lm_eval.tasks import get_task_dict
 from lm_eval.utils import make_table
@@ -10,8 +10,10 @@ from lm_eval.utils import make_table
 # os.chdir(os.path.join(sys.path[0], './EE_Clean'))
 
 from models.mistral.model import ModelArgs
-from models.mistral.model import Transformer
+from models.mistral.model_EE import Transformer
 from models.mistral.tokenizer import Tokenizer
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+
 
 import json
 import torch
@@ -31,25 +33,55 @@ args.max_batch_size = batch_size
 
 print("Loading model...")
 
+path = f"./weights/mistral"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
+plot_intermediate_states = True
+th_for_EE = 0.7
+ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
+ee_pos = None
+
+
 path = "./weights/mistral/7b-v0.3"
 with open(path+ "/params.json") as f:
     args = ModelArgs(**dict(json.load(f)))
     args.lora.enable = False
-    model = Transformer(args).to(torch.bfloat16).to("cuda")
+    args.ee_pos = ee_pos
+    model = Transformer(args)
+
+print("Loading weights...")
 model.from_pretrained(path + "/consolidated.safetensors")
 n_layer = model.args.n_layers
 
+model.th = model.th * th_for_EE
+
+if ee_pos is not None:
+    for i in range(len(ee_pos)):
+        model.ee[i].load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
+
+print("Sending to GPU...")
 model.eval()
-model.to(device = device, dtype = torch.bfloat16)
+if device == "cuda":
+    model.to(device = device, dtype = torch.bfloat16)
 
 print("Loading tokenizer...")
 tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
+# tokenizer = MistralTokenizer.v3().instruct_tokenizer
 
 # instantiate an LM subclass that takes your initialized model and can run
 # - `Your_LM.loglikelihood()`
 # - `Your_LM.loglikelihood_rolling()`
 # - `Your_LM.generate_until()`
-lm_obj = Mistral_7b(model=model, tokenizer = tokenizer, batch_size=batch_size, max_length = max_length, max_gen_tokens = max_gen_tokens,device = device)
+
+lm_obj = Mistral_7b(model=model,
+                    tokenizer = tokenizer,
+                    batch_size=batch_size,
+                    max_length = max_length,
+                    max_gen_tokens = max_gen_tokens,
+                    temperature = 1.0,
+                    top_k = None,
+                    recompute_states = False,
+                    use_EE = True if ee_pos is not None else False,
+                    device = device)
 
 # optional: the task_manager indexes tasks including ones
 # specified by the user through `include_path`.
@@ -69,12 +101,18 @@ print("Evaluating...")
 #     # num_fewshot=3,
 # )
 
+
 # for triviaqa in need to generete text
 # also for truthfulqa
+# nq_open
+
+# triviaqa
+# coqa
+# generate_until
 
 results = simple_evaluate(
     model = lm_obj,
-    tasks = ["truthfulqa"],
+    tasks = ["truthfulqa_gen"],
     num_fewshot = 0,
 )
 
