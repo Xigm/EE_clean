@@ -1,6 +1,7 @@
 import sys
 import os
-sys.path.append(os.path.join(sys.path[0], './EleutherAI_Eval_harness'))
+sys.path.append(os.path.join(sys.path[0], '../../EleutherAI_Eval_harness'))
+sys.path.append(os.path.join(sys.path[0], '../../'))
 
 # from lm_eval.models.mistral_models import Mistral_7b
 from lm_eval.models.gpt2_custom import gpt2_custom

@@ -273,6 +273,16 @@ class Mamba(ModelBase, nn.Module):
                     self.exits_done.append(i + 1)
                     self.positions_exit.append(sum(seqlens))
 
+                    hidden_states, residual = self.model.backbone.layers[-1](
+                        hidden_states, residual, inference_params=self.inference_params
+                    )
+
+                    # little patch
+                    if 2 == len(residual.shape):
+                        residual.unsqueeze_(0)
+                    elif 1 == len(residual.shape):
+                        residual.unsqueeze_(0).unsqueeze_(0)
+
                     break  
 
                     # pass
@@ -335,10 +345,7 @@ class Mamba(ModelBase, nn.Module):
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
-
-        if until is not None:
-            len_until = len(until)
-
+        
         # COLD start
         pos_prompt = idx.shape[0]
         logits = self.forward_inference(idx, seqlens = [pos_prompt], use_EE = False) # just to make sure the model is in the right shape

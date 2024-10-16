@@ -484,7 +484,7 @@ class Transformer(nn.Module):
         return self.output(self.norm(h)).float()
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False, repetition_penalty = 1.0):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -492,9 +492,6 @@ class Transformer(nn.Module):
         """
 
         self.recompute_states = recompute_states
-
-        if until is not None:
-            len_until = len(until)
 
         # COLD start
         pos_prompt = idx.shape[0]
@@ -519,7 +516,22 @@ class Transformer(nn.Module):
             # forward the model to get the logits for the index in the sequence
             logits = self.forward_inference(idx_next, seqlens=[idx.shape[0]], use_EE = use_EE)
             # pluck the logits at the final step and scale by desired temperature
-            logits = logits[-1, :] / temperature
+            logits = logits[-1, :]
+            
+            # apply repetition penalty
+            if repetition_penalty != 0:
+                apply_pen_tokens = torch.where(idx > 894)[0]
+                len_mask = len(apply_pen_tokens)
+                mask = torch.flip(torch.exp(-torch.arange(len_mask, device = "cuda", dtype = logits.dtype)), dims = (0,)) / (repetition_penalty**2)
+                logits[idx[apply_pen_tokens]] = logits[idx[apply_pen_tokens]] * mask
+
+                # we will just square the penalty in the mask
+                
+                # where = torch.zeros(logits.shape, device = "cuda", dtype=torch.bool)
+                # where[idx[apply_pen_tokens]] = True
+                # logits = torch.where(where, logits, logits * repetition_penalty) 
+            
+            logits = logits / temperature
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
@@ -532,8 +544,9 @@ class Transformer(nn.Module):
             idx = torch.cat((idx, idx_next))
 
             if until is not None:
-                if torch.equal(idx[-len_until:], until):
-                    break
+                for stops in until:
+                    if torch.equal(idx[-len(stops):], torch.tensor(stops, device = self.device)):
+                        break
 
         if not hasattr(self, 'lens_generated'):
             self.lens_generated = []

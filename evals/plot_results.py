@@ -1,10 +1,12 @@
 import json
-
+import os
+import sys
+sys.path.append(os.path.join(sys.path[0], '../../'))
 # Define the path to the folder where the files are located
 # path = f"./weights/mistral"
 # path_weights_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
-# dataset = "triviaqa"
-# recomputation = False
+# dataset = "truthfulqa_gen"
+# recomputation = True
 
 path = "./weights/mamba"
 path_weights_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
@@ -58,29 +60,45 @@ if "mistral" in path_weights_EE:
         else:
             # for ex, pos, len in zip(exits_done, positions_exited, lens_generated):
             # speedup_r += n_layers/torch.tensor(ex, dtype = torch.float).mean()
-            if recomp:
-                pen = (penalize*(n_layers-torch.tensor(exits_done[i], dtype = torch.float).mean()))
-            else:
-                pen = 0
-            speedups.append(n_layers/(pen+torch.tensor(exits_done[i], dtype = torch.float).mean()))
+            total_blocks = sum(torch.tensor(lens_generated[i], dtype = torch.float) - 1) * n_layers
+            blocks_ignored = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float))
+
+            speedup_r = total_blocks / (total_blocks - blocks_ignored)
+            speedups.append(speedup_r)
+
+            # if recomp:
+            #     pen = (penalize*(n_layers-torch.tensor(exits_done[i], dtype = torch.float).mean()))
+            # else:
+            #     pen = 0
+            # speedups.append(n_layers/(pen+torch.tensor(exits_done[i], dtype = torch.float).mean()))
+
+
 elif "mamba" in path_weights_EE:
     for i, th in enumerate(range_th):
         if exits_done[i] == []:
             speedups.append(1)
         else:
-            if recomp:
-                pen = (penalize*(n_layers-torch.tensor(exits_done[i], dtype = torch.float).mean()))
-            else:
-                pen = 0
-            speedups.append(n_layers/(pen+torch.tensor(exits_done[i], dtype = torch.float).mean()))
+            total_blocks = sum(torch.tensor(lens_generated[i], dtype = torch.float) - 1) * n_layers
+            blocks_ignored = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float))
+
+            speedup_r = total_blocks / (total_blocks - blocks_ignored)
+            speedups.append(speedup_r)
+        
+        
+            # if recomp:
+            #     pen = (penalize*(n_layers-torch.tensor(exits_done[i], dtype = torch.float).mean()))
+            # else:
+            #     pen = 0
+            # speedups.append(n_layers/(pen+torch.tensor(exits_done[i], dtype = torch.float).mean()))
 
 # Define the y-axis values
 if dataset == "triviaqa":
-    metrics = "exact_match,remove_whitespace"
+    metrics = ["exact_match,remove_whitespace"]
 elif dataset == "coqa":
     metrics = ["f1,none", "em,none"]
 elif dataset == "truthfulqa_gen":
-    metrics = ["bleu_max,none","rouge1_max,none","rouge2_max,none","rougeL_max,none"]
+    submetric = "acc" # acc, diff, max
+    metrics = ["bleu_"+submetric+",none","rouge1_"+submetric+",none","rouge2_"+submetric+",none","rougeL_"+submetric+",none"]
 
 metric_values = []
 for metric in metrics:
@@ -106,7 +124,15 @@ for j, metric in enumerate(metric_values):
     plt.xlabel('Speedups')
     plt.ylabel('Metric Values')
     plt.legend()
-    plt.savefig(f"{path_weights_EE}/results/"+dataset+recomp+"/speedup_vs_"+metrics[j].split(",")[0]+".png")
+    model_name = "mistral" if "mistral" in path_weights_EE else "mamba"
+    # plt.savefig(f"{path_weights_EE}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
+    
+    # check if the folder exists, if not create it
+    import os
+    if not os.path.exists(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp):
+        os.makedirs(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp)
+    plt.savefig(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
+    
 
 
 

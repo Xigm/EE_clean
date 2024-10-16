@@ -377,11 +377,15 @@ class Mamba_7b(TemplateLM):
 
             # cont_toks_list = cont_text.tolist()
             for cont_text, context in zip(cont_texts, contexts):
+                # if the first token is a \n delete it
+                if cont_text[:1] == "\n":
+                    cont_text = cont_text[1:]    
+
                 # discard context + left-padding toks if using causal decoder-only LM
                 if "\n" in cont_text:
                     s = cont_text.split("\n")[0]
                 else:
-                    s = cont_text[0]
+                    s = cont_text
 
                 # s = self.tok_decode(cont_toks)
 

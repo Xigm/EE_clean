@@ -26,13 +26,14 @@ fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train"
 
 device = "cuda"
 model_choice = "mistral"
-size = "350" # 124M, 350M, 774M, 1558M
+# size = "350" # 124M, 350M, 774M, 1558M
 # path = f"./weights/gpt2/gpt2_{size}M_100B_FinewebEdu_hf"
-path = f"./weights/gpt2/gpt2"
+# path = f"./weights/gpt2/gpt2"
+path = f"./weights/mistral"
 path_weigths_EE = path + f"./EE_1_layers_middle_2"
 
 # ee_pos = [32, 40, 48, 56]
-ee_pos = [16, 20, 24, 28]
+ee_pos = [15, 19, 23, 27]
 
 if model_choice == "gpt2":
     
@@ -216,48 +217,6 @@ x_train = [p.item() for p in x_train if p not in x_val]
 
 print("Mean ratio is:", metrics[:,-1].mean().item())
 
-# make a subplot with 4 graphs
-fig, axs = plt.subplots(2, 2)
-fig.suptitle('Training and Validation Metrics')
-axs[0, 0].plot(x_train, metrics[:,0].numpy(), label="Training")
-axs[0, 0].plot(x_val, metrics_val[:,0].numpy(), label="Validation")
-axs[0, 0].plot(x_train, metrics[:,-1].numpy(), '--', label="Ratio")
-# add a plot consisting of the windowed mean of the metrics[:,0]
-window = int(iters*0.05)
-windowed_mean = torch.tensor([metrics[i:i+window,0].mean().item() for i in range(iters-window)])
-axs[0, 0].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
-axs[0, 0].set_title('EE Accuracy')
-axs[0, 0].legend()
-
-axs[0, 1].plot(x_train, metrics[:,1].numpy(), label="Training")
-axs[0, 1].plot(x_val, metrics_val[:,1].numpy(), label="Validation")
-
-# add a plot consisting of the windowed mean of the metrics[:,1]
-windowed_mean = torch.tensor([metrics[i:i+window,1].mean().item() for i in range(iters-window)])
-axs[0, 1].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
-axs[0, 1].legend()
-axs[0, 1].set_title('EE Recall')
-
-axs[1, 0].plot(x_train, metrics[:,2].numpy(), label="Training")
-axs[1, 0].plot(x_val, metrics_val[:,2].numpy(), label="Validation")
-
-# add a plot consisting of the windowed mean of the metrics[:,2]
-windowed_mean = torch.tensor([metrics[i:i+window,2].mean().item() for i in range(iters-window)])
-axs[1, 0].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
-axs[1, 0].set_title('EE Precision')
-axs[1, 0].legend()
-
-axs[1, 1].plot(x_train, metrics[:,3].numpy(), label="Training")
-axs[1, 1].plot(x_val, metrics_val[:,3].numpy(), label="Validation")
-
-# add a plot consisting of the windowed mean of the metrics[:,3]
-windowed_mean = torch.tensor([metrics[i:i+window,3].mean().item() for i in range(iters-window)])
-axs[1, 1].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
-axs[1, 1].legend()
-axs[1, 1].set_title('EE F1')
-
-plt.show()
-
 
 print("Saving weights")
 
@@ -321,3 +280,53 @@ if model_choice == "mamba":
     for i in range(len(ee_pos)):
         torch.save(model.model.backbone.ee[0].state_dict(), f"./weights/mamba/{name}/layer_{ee_index}_EE")
         ee_index += 1
+
+
+# make a subplot with 4 graphs
+fig, axs = plt.subplots(2, 2)
+fig.suptitle('Training and Validation Metrics')
+axs[0, 0].plot(x_train, metrics[:,0].numpy(), label="Training")
+axs[0, 0].plot(x_val, metrics_val[:,0].numpy(), label="Validation")
+axs[0, 0].plot(x_train, metrics[:,-1].numpy(), '--', label="Ratio")
+# add a plot consisting of the windowed mean of the metrics[:,0]
+window = int(iters*0.05)
+windowed_mean = torch.tensor([metrics[i:i+window,0].mean().item() for i in range(iters-window)])
+axs[0, 0].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
+axs[0, 0].set_title('EE Accuracy')
+axs[0, 0].legend()
+
+axs[0, 1].plot(x_train, metrics[:,1].numpy(), label="Training")
+axs[0, 1].plot(x_val, metrics_val[:,1].numpy(), label="Validation")
+
+# add a plot consisting of the windowed mean of the metrics[:,1]
+windowed_mean = torch.tensor([metrics[i:i+window,1].mean().item() for i in range(iters-window)])
+axs[0, 1].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
+axs[0, 1].legend()
+axs[0, 1].set_title('EE Recall')
+
+axs[1, 0].plot(x_train, metrics[:,2].numpy(), label="Training")
+axs[1, 0].plot(x_val, metrics_val[:,2].numpy(), label="Validation")
+
+# add a plot consisting of the windowed mean of the metrics[:,2]
+windowed_mean = torch.tensor([metrics[i:i+window,2].mean().item() for i in range(iters-window)])
+axs[1, 0].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
+axs[1, 0].set_title('EE Precision')
+axs[1, 0].legend()
+
+axs[1, 1].plot(x_train, metrics[:,3].numpy(), label="Training")
+axs[1, 1].plot(x_val, metrics_val[:,3].numpy(), label="Validation")
+
+# add a plot consisting of the windowed mean of the metrics[:,3]
+windowed_mean = torch.tensor([metrics[i:i+window,3].mean().item() for i in range(iters-window)])
+axs[1, 1].plot(torch.arange(window/2, iters-window +window/2, 1), windowed_mean, label="Windowed Mean", color="red", linewidth=3.0)
+axs[1, 1].legend()
+axs[1, 1].set_title('EE F1')
+
+# plt.show()
+# save plot with weights of EE
+if model_choice == "gpt2":
+    plt.savefig(f"./weights/gpt2/{name}/metrics.png")
+elif model_choice == "mistral":
+    plt.savefig(f"./weights/mistral/{name}/metrics.png")
+elif model_choice == "mamba":
+    plt.savefig(f"./weights/mamba/{name}/metrics.png")

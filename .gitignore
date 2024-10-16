@@ -9,3 +9,9 @@ datasets/*
 # *EE*
 
 .vscode*
+
+*.png
+
+try/*
+
+TEST/*

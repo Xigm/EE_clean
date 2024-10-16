@@ -2,6 +2,7 @@ import datasets
 import numpy as np
 import sacrebleu
 from rouge_score import rouge_scorer, scoring
+from tqdm import tqdm
 
 
 def process_results_mc2(doc, results):

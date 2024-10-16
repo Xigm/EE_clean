@@ -375,6 +375,11 @@ class Mistral_7b(TemplateLM):
             #     kwargs["max_length"] = context_enc.shape[1] + max_gen_toks
 
             # perform batched generation
+            eval_name = requests[0].metadata[0]
+            until_list = until
+            # if eval_name == "gsm8k":
+            #     until_list.append("####")
+
             cont_texts = self._model_generate(
                 context=contexts,
                 until=until,
@@ -385,11 +390,21 @@ class Mistral_7b(TemplateLM):
             for cont_text, context in zip(cont_texts, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
                 # s = cont_text[len(context):].split("\n\n")[0]
-
-                if "\n" in cont_text:
-                    s = cont_text.split("\n")[0]
-                else:
-                    s = cont_text[0]
+                for term in until:
+                    if len(term) > 0:
+                        # ignore '' separator,
+                        # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
+                        s = s.split(term)[0]
+                
+                
+                # if cont_text[:1] == "\n":
+                #     cont_text = cont_text[1:]
+                # if "\n" in cont_text and "gsm8k" not in eval_name:
+                #     s = cont_text.split("\n")[0]
+                # elif "gsm8k" in eval_name:
+                #     s = cont_text.split("####")[0]
+                # else:
+                #     s = cont_text
 
                 # s = self.tok_decode(cont_toks)
 
@@ -484,8 +499,12 @@ class Mistral_7b(TemplateLM):
             top_k = inference_params["top_k"]
             use_EE = inference_params["use_EE"]
 
+        
+        # until_seqs = ["####"]
+        until_toks = [tokenizer.encode(s)[1:] for s in until]
+
         enc_prompts = encode(prompts)
-        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = encode("\n")[2:], recompute_states = recompute_states)
+        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks, recompute_states = recompute_states)
                
         res = decode(generated[len(enc_prompts):])
        

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from lm_eval.api.model import LM
     from lm_eval.tasks import Task
 
+from tqdm import tqdm
 
 @positional_deprecated
 def simple_evaluate(
@@ -419,7 +420,7 @@ def evaluate(
             doc_iterator = task.doc_iterator(
                 rank=RANK, limit=limit, world_size=WORLD_SIZE
             )
-            for doc_id, doc in doc_iterator:
+            for doc_id, doc in tqdm(doc_iterator, desc="Processing results"):
                 requests = instances_by_doc_id[doc_id]
                 metrics = task.process_results(
                     doc, [req.filtered_resps[filter_key] for req in requests]
