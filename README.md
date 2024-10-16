@@ -1,6 +1,8 @@
 # Project Title
 
-**Brief description**: A concise summary of what the project does, its goals, or its main functionality.
+Project with the aim to implement and analyze the impact on computation of EE in LLMs: Transformers and Mamba.
+
+This codes may (should) train any Mistral model (transformer or mamba) with EEs for its usage.
 
 ---
 
@@ -91,6 +93,6 @@ Instructions for users who want to contribute to the project...
 ## Acknowledgements
 
 Thanks to:
-    - EleutherAI
-    - Mistral
-    - HuggingFace
+    * EleutherAI
+    * Mistral
+    * HuggingFace
