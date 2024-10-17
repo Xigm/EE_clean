@@ -55,24 +55,24 @@ Highlight the main features of your project. What makes it special? This is a go
 ```
 ├── datasets/                           # If some local hosted dataset if needed
 │   ├── models/                         # ML models
-│   ├── utils/                          # Helper functions
+│   └── utils/                          # Helper functions
 ├── EleutherAI_Eval_harness/            # Codes from EleutherAI to evaluate LLMs
-│   ├── lm_eval/                        
+│   └── lm_eval/                        
 │      ├── models/                      # Wrappers for models to be tested are here
-│          ├── mamba_models_EE.py       # Custom wrapper for mamba 
-│          ├── mistral_models_EE.py     # Custom wrapper for mistral
-│      ├── tasks/                       # Different task available
+│      │   ├── mamba_models_EE.py       # Custom wrapper for mamba 
+│      │   └── mistral_models_EE.py     # Custom wrapper for mistral
+│      └── tasks/                       # Different task available
 ├── evals/                              # Codes to perform evaluations
 │   ├── individual_evals /              # Evaluate a model in a single task
-│   ├── sweep_th/                       # Get results for speed up vs performance
+│   └── sweep_th/                       # Get results for speed up vs performance
 │   plot_results.py                     # Compute the graphs for the data obtained
 ├── models/                             # Main codes for the models
 │   ├── mamba/                          # Mamba implementations
-│   ├── mistral/                        # Transformer implementations
+│   └── mistral/                        # Transformer implementations
 ├── weights/                            # To save the backbones and EE weights
 │   ├── mamba/                           
 │   │   ├── codestral7b/                # Main backbone weights
-│   │   ├── EE_given_config/            # EE weights for a given configuration
+│   │   └── EE_given_config/            # EE weights for a given configuration
 │   └── mistral/                        # Transformer implementations
 │       ├── mistral7b/                  # Main backbone weights
 │       └── EE_given_config/            # EE weights for a given configuration
@@ -93,6 +93,7 @@ Instructions for users who want to contribute to the project...
 ## Acknowledgements
 
 Thanks to:
-    * EleutherAI
-    * Mistral
-    * HuggingFace
+
+* EleutherAI
+* Mistral
+* HuggingFace

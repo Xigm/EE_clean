@@ -61,6 +61,13 @@ class Mamba(ModelBase, nn.Module):
 
         self.inference_params =  params
 
+    def refresh_generation(self):
+
+        inference_params = namedtuple('inference_params', ['key_value_memory_dict', 'seqlen_offset'])
+
+        params = inference_params({}, 0)
+
+        self.inference_params =  params
 
     @property
     def dtype(self) -> torch.dtype:
@@ -339,7 +346,7 @@ class Mamba(ModelBase, nn.Module):
         # self.to(device=device, dtype=dtype)
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 1., use_EE = False, until = None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 1., use_EE = False, until = None, recompute_states = False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
