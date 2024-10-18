@@ -3,15 +3,16 @@ import os
 import sys
 sys.path.append(os.path.join(sys.path[0], '../../'))
 # Define the path to the folder where the files are located
-# path = f"./weights/mistral"
+path = f"./weights/mistral"
 # path_weights_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
-# dataset = "truthfulqa_gen"
-# recomputation = True
+path_weights_EE = path + f"/EE_1_layers_middle_2_pos_15_19_23_27"
+dataset = "truthfulqa_gen"
+recomputation = True
 
-path = "./weights/mamba"
-path_weights_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
-dataset = "coqa"
-recomputation = False
+# path = "./weights/mamba"
+# path_weights_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
+# dataset = "coqa"
+# recomputation = False
 
 
 recomp = "/recompute_states" if recomputation else "/no_recomp" 
@@ -55,7 +56,7 @@ speedups = []
 speedup_r = 0
 if "mistral" in path_weights_EE:
     for i, th in enumerate(range_th):
-        if exits_done[i] == []:
+        if exits_done[i] == [] or exits_done[i] == 0:
             speedups.append(1)
         else:
             # for ex, pos, len in zip(exits_done, positions_exited, lens_generated):
@@ -125,13 +126,13 @@ for j, metric in enumerate(metric_values):
     plt.ylabel('Metric Values')
     plt.legend()
     model_name = "mistral" if "mistral" in path_weights_EE else "mamba"
-    # plt.savefig(f"{path_weights_EE}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
+    plt.savefig(f"{path_weights_EE}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
     
     # check if the folder exists, if not create it
-    import os
-    if not os.path.exists(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp):
-        os.makedirs(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp)
-    plt.savefig(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
+    # import os
+    # if not os.path.exists(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp):
+    #     os.makedirs(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp)
+    # plt.savefig(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
     
 
 

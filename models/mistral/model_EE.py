@@ -66,6 +66,9 @@ class Attention(nn.Module):
 
         self.register_buffer("bias", torch.tril(torch.ones(args.block_size, args.block_size))
                                         .view(1, args.block_size, args.block_size), persistent = False)
+        
+        self.register_buffer("k", torch.zeros((args.block_size, args.n_kv_heads, args.head_dim), device = 'cuda').to(torch.bfloat16))
+        self.register_buffer("v", torch.zeros((args.block_size, args.n_kv_heads, args.head_dim), device = 'cuda').to(torch.bfloat16))
 
     def forward(
         self,
@@ -482,9 +485,14 @@ class Transformer(nn.Module):
             self.intermediate_states[i+1, sum(seqlens) - 1] = h.detach()
 
         return self.output(self.norm(h)).float()
+    
+    def refresh_caches(self):
+        for layer in self.layers:
+            del layer.attention.k
+            del layer.attention.v
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False, repetition_penalty = 1.0):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False, repetition_penalty = 0):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -492,6 +500,9 @@ class Transformer(nn.Module):
         """
 
         self.recompute_states = recompute_states
+
+        # refresh kv caches if exist
+        self.refresh_caches()
 
         # COLD start
         pos_prompt = idx.shape[0]
@@ -503,14 +514,18 @@ class Transformer(nn.Module):
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits[logits < v[[-1]]] = -float('Inf')
 
-        # apply softmax to convert logits to (normalized) probabilities
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        # sample from the distribution
-        idx_next = torch.multinomial(probs, num_samples=1)
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1)
+        else:
+            idx_next = torch.argmax(logits, dim = -1).view(1)
         # append sampled index to the running sequence and continue
         idx = torch.cat((idx, idx_next))
 
         pos = pos_prompt + 1
+        break_loop = 0
 
         for _ in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
@@ -536,18 +551,22 @@ class Transformer(nn.Module):
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[[-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = torch.nn.functional.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
+                # apply softmax to convert logits to (normalized) probabilities
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                # sample from the distribution
+                idx_next = torch.multinomial(probs, num_samples=1)
+            else:
+                idx_next = torch.argmax(logits, dim = -1).view(1)
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next))
 
             if until is not None:
                 for stops in until:
                     if torch.equal(idx[-len(stops):], torch.tensor(stops, device = self.device)):
-                        break
-
+                        break_loop = 1
+                if break_loop == 1:
+                    break
+                
         if not hasattr(self, 'lens_generated'):
             self.lens_generated = []
         self.lens_generated.append(idx.shape[0] - pos_prompt)

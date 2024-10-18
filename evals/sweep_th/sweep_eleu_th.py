@@ -36,7 +36,8 @@ args.max_batch_size = batch_size
 print("Loading model...")
 
 path = f"./weights/mistral"
-path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
+# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_15_19_23_27"
 plot_intermediate_states = True
 th_for_EE = 0.7
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
@@ -96,8 +97,9 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 #     ["truthfulqa"]
 #     )
 
-range_th = torch.arange(0, 1.0, 0.1)
-# range_th = torch.tensor([1, 0.7])
+# range_th = torch.arange(0, 1.0, 0.1)
+range_th = torch.tensor([0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8])
+
 results_list = []
 exits_done = []
 positions_exited = []
@@ -125,13 +127,12 @@ for th in range_th:
     # triviaqa WITH n fewshots 2!!!!
     # coqa ONLY posible with n_shots = 0
     # truthfulqa_gen n_shots = 1
-    # dataset = "truthfulqa_gen"
-    dataset = "gsm8k"
+    dataset = "coqa"
 
     results = simple_evaluate(
         model = lm_obj,
         tasks = [dataset],
-        num_fewshot = 5,
+        num_fewshot = 0,
     )
 
     results_list.append(results)

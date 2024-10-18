@@ -377,8 +377,8 @@ class Mistral_7b(TemplateLM):
             # perform batched generation
             eval_name = requests[0].metadata[0]
             until_list = until
-            # if eval_name == "gsm8k":
-            #     until_list.append("####")
+            if eval_name == "coqa":
+                until_list.append("\n\n")
 
             cont_texts = self._model_generate(
                 context=contexts,
@@ -390,6 +390,7 @@ class Mistral_7b(TemplateLM):
             for cont_text, context in zip(cont_texts, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
                 # s = cont_text[len(context):].split("\n\n")[0]
+                s = cont_text
                 for term in until:
                     if len(term) > 0:
                         # ignore '' separator,
@@ -500,8 +501,10 @@ class Mistral_7b(TemplateLM):
             use_EE = inference_params["use_EE"]
 
         
-        # until_seqs = ["####"]
-        until_toks = [tokenizer.encode(s)[1:] for s in until]
+        until_toks = [tokenizer.encode(s)[2:] for s in until]
+
+        if "\n" in until:
+            until_toks.append(tokenizer.encode("\n")[2:])
 
         enc_prompts = encode(prompts)
         generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks, recompute_states = recompute_states)

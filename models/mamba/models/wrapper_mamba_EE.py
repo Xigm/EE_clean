@@ -346,13 +346,15 @@ class Mamba(ModelBase, nn.Module):
         # self.to(device=device, dtype=dtype)
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 1., use_EE = False, until = None, recompute_states = False):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 0, use_EE = False, until = None, recompute_states = False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
         
+        self.refresh_generation()
+
         # COLD start
         pos_prompt = idx.shape[0]
         logits = self.forward_inference(idx, seqlens = [pos_prompt], use_EE = False) # just to make sure the model is in the right shape
@@ -366,10 +368,13 @@ class Mamba(ModelBase, nn.Module):
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits[logits < v[[-1]]] = -float('Inf')
 
-        # apply softmax to convert logits to (normalized) probabilities
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        # sample from the distribution
-        idx_next = torch.multinomial(probs, num_samples=1)
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1)
+        else:
+            idx_next = torch.argmax(logits, dim = -1).view(1)
+
         # append sampled index to the running sequence and continue
         idx = torch.cat((idx, idx_next), dim = 0)
 
@@ -380,6 +385,8 @@ class Mamba(ModelBase, nn.Module):
         params = inference_params(self.inference_params.key_value_memory_dict, pos)
 
         self.inference_params = params
+
+        break_loop = 0
 
         for i in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
@@ -405,15 +412,22 @@ class Mamba(ModelBase, nn.Module):
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[[-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = torch.nn.functional.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
+                # apply softmax to convert logits to (normalized) probabilities
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                # sample from the distribution
+                idx_next = torch.multinomial(probs, num_samples=1)
+
+            else:
+                idx_next = torch.argmax(logits, dim = -1).view(1)
+
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next))
 
             if until is not None:
-                if torch.equal(idx[-len_until:], until):
+                for stops in until:
+                    if torch.equal(idx[-len(stops):], torch.tensor(stops, device = self.device)):
+                        break_loop = 1
+                if break_loop == 1:
                     break
 
         if not hasattr(self, 'lens_generated'):

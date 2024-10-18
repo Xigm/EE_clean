@@ -36,7 +36,8 @@ args.max_batch_size = batch_size
 print("Loading model...")
 
 path = f"./weights/mistral"
-path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
+# path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_15_19_23_27"
 plot_intermediate_states = True
 th_for_EE = 0.7
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
@@ -97,17 +98,21 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 #     )
 
 # range_th = torch.arange(0, 1.0, 0.1)
-range_th = torch.tensor([0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8])
+range_th = torch.tensor([0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.5, 0.7, 1])
 # range_th = torch.tensor([1, 0.7])
-results_list = []
-exits_done = []
-positions_exited = []
-lens_generated = []
 
 datasets = ["triviaqa", "coqa", "truthfulqa_gen"]
 n_shots = [2, 0, 1]
 for dataset,fewshots_set in zip(datasets, n_shots):
+
+    results_list = []
+    exits_done = []
+    positions_exited = []
+    lens_generated = []
+
     for th in range_th:
+
+        model.th = torch.ones(n_layer - 1) * th
 
         lm_obj = Mistral_7b(model=model,
             tokenizer = tokenizer,
@@ -119,8 +124,6 @@ for dataset,fewshots_set in zip(datasets, n_shots):
             recompute_states = recompute_states,
             use_EE = True,
             device = device)
-
-        model.th = torch.ones(n_layer - 1) * th
 
         # for triviaqa in need to generete text
         # also for truthfulqa

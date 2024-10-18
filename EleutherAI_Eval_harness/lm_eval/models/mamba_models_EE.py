@@ -367,6 +367,10 @@ class Mamba_7b(TemplateLM):
 
             # if "max_length" not in kwargs:
             #     kwargs["max_length"] = context_enc.shape[1] + max_gen_toks
+            eval_name = requests[0].metadata[0]
+            until_list = until
+            if eval_name == "coqa":
+                until_list.append("\n\n")
 
             # perform batched generation
             cont_texts = self._model_generate(
@@ -378,14 +382,13 @@ class Mamba_7b(TemplateLM):
             # cont_toks_list = cont_text.tolist()
             for cont_text, context in zip(cont_texts, contexts):
                 # if the first token is a \n delete it
-                if cont_text[:1] == "\n":
-                    cont_text = cont_text[1:]    
-
-                # discard context + left-padding toks if using causal decoder-only LM
-                if "\n" in cont_text:
-                    s = cont_text.split("\n")[0]
-                else:
-                    s = cont_text
+                
+                s = cont_text
+                for term in reversed(until):
+                    if len(term) > 0:
+                        # ignore '' separator,
+                        # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
+                        s = s.split(term)[0]
 
                 # s = self.tok_decode(cont_toks)
 
@@ -478,8 +481,13 @@ class Mamba_7b(TemplateLM):
             top_k = inference_params["top_k"]
             use_EE = inference_params["use_EE"]
     
+        until_toks = [tokenizer.encode(s)[2:] for s in until]
+
+        if "\n" in until:
+            until_toks.append(tokenizer.encode("\n")[2:])
+
         enc_prompts = encode(prompts)
-        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = encode("\n")[2:])
+        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks)
                
         res = decode(generated[len(enc_prompts):])
 

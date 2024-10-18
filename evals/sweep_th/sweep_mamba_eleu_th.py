@@ -152,7 +152,8 @@ tokenizer = Tokenizer("./weights/mamba/mamba-codestral-7B-v0.1/tokenizer.model.v
 #     ["truthfulqa"]
 #     )
 
-range_th = torch.arange(0, 1.0, 0.1)
+# range_th = torch.arange(0, 1.0, 0.1)
+range_th = torch.tensor([0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8])
 # range_th = torch.tensor([0.7, 1])
 results_list = []
 exits_done = []

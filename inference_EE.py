@@ -40,8 +40,7 @@ if model_choice == "mamba":
     model.refresh_generation()
     
 with torch.no_grad():
-    output2 = 
-    model.generate(encode(inputs).to("cuda"), temperature=1.5, max_new_tokens=tokens_generated, top_k = 10, use_EE = True, recompute_states=recompute_states)
+    output2 = model.generate(encode(inputs).to("cuda"), temperature=1.5, max_new_tokens=tokens_generated, top_k = 10, use_EE = True, recompute_states=recompute_states)
 
 output_text = decode(output2)
 

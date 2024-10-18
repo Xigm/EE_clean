@@ -21,7 +21,7 @@ import torch
 
 path_weights = "./weights/mistral/7B-v0.3"
 max_length = 2048*2
-max_gen_tokens = 128
+max_gen_tokens = 32
 device = "cuda"
 batch_size = 1
 
@@ -37,9 +37,9 @@ print("Loading model...")
 path = f"./weights/mistral"
 path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_16_20_24_28"
 plot_intermediate_states = True
-th_for_EE = 1
+th_for_EE = 0.6
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
-ee_pos = None
+# ee_pos = None
 
 
 path = "./weights/mistral/7b-v0.3"
@@ -113,8 +113,8 @@ print("Evaluating...")
 
 results = simple_evaluate(
     model = lm_obj,
-    tasks = ["gsm8k"],
-    num_fewshot = 5,
+    tasks = ["coqa"],
+    num_fewshot = 0,
 )
 
 print(make_table(results))
