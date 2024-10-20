@@ -30,7 +30,7 @@ recompute_states = False
 print("Loading model...")
 
 path = f"./weights/mamba"
-path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_wsum_pos_31_39_47_55"
 plot_intermediate_states = True
 th_for_EE = 0.5
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
@@ -97,6 +97,7 @@ ranges_blocks = torch.tensor([[1, 2, 3, 4, 5],
                              )
 for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, ranges_th, ranges_blocks):
 
+    
     results_list = []
     exits_done = []
     positions_exited = []

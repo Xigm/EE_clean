@@ -138,7 +138,9 @@ def get_model_and_tok_train(model_choice, path, ee_pos, device = "cuda"):
             args = ModelArgs(**dict(json.load(f)))
             args.lora.enable = False
             args.ee_pos = ee_pos
+            print("Loading model...")
             model = Transformer(args).to(torch.bfloat16).to("cuda")
+        print("Loading weights...")
         model.from_pretrained(path + "/consolidated.safetensors")
         n_layer = model.args.n_layers
 

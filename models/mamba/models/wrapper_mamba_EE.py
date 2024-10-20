@@ -175,14 +175,14 @@ class Mamba(ModelBase, nn.Module):
 
             weighted_loss = torch.ones(len(self.args.ee_pos))/len(self.args.ee_pos)
             loss = 0
-            losses = []
+            losses = torch.empty(len(self.args.ee_pos))
             ee_index = 0
             for i in range(len(self.args.ee_pos)):
                 loss_p = weighted_loss[i] * torch.nn.functional.cross_entropy(
                                     exits[0, :shape_ee[1], ee_index].view(shape_ee[1], 2),
                                     diff[0, :, ee_index].view(-1)
                                     )
-                losses.append(loss_p)
+                losses[i] = loss_p
                 # loss += loss_p
                 ee_index += 1
 

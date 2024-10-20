@@ -365,14 +365,14 @@ class Transformer(nn.Module):
             # sum of losses
             weighted_loss = torch.ones(len(self.args.ee_pos))/len(self.args.ee_pos)
             loss = 0
-            losses = []
+            losses = torch.empty(len(self.ee_pos))
             ee_index = 0
             for i in range(len(self.args.ee_pos)):
                 loss_p = weighted_loss[i] * torch.nn.functional.cross_entropy(
                                     exits[0, :shape_ee[0], ee_index].view(shape_ee[0], 2),
                                     diff[0, :, ee_index].view(-1)
                                     )
-                losses.append(loss_p)
+                losses[i] = loss_p
                 # loss += loss_p
                 ee_index += 1
 
@@ -573,7 +573,10 @@ class Transformer(nn.Module):
                 
         if not hasattr(self, 'lens_generated'):
             self.lens_generated = []
-        self.lens_generated.append(idx.shape[0] - pos_prompt)
+        if break_loop == 1:
+            self.lens_generated.append(idx.shape[0] - pos_prompt)
+        else:
+            self.lens_generated.append(-1)
         
         return idx
 

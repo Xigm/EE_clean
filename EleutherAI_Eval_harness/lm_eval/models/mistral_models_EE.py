@@ -380,11 +380,11 @@ class Mistral_7b(TemplateLM):
             eval_name = requests[0].metadata[0]
             until_list = until
             if eval_name == "coqa":
-                until_list.append("\n\n")
+                until_list.append("\n")
 
             cont_texts = self._model_generate(
                 context=contexts,
-                until=until,
+                until=until_list,
                 inference_params=self.inference_params
             )
 
@@ -393,7 +393,7 @@ class Mistral_7b(TemplateLM):
                 # discard context + left-padding toks if using causal decoder-only LM
                 # s = cont_text[len(context):].split("\n\n")[0]
                 s = cont_text
-                for term in until:
+                for term in until_list:
                     if len(term) > 0:
                         # ignore '' separator,
                         # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
@@ -504,9 +504,6 @@ class Mistral_7b(TemplateLM):
 
         
         until_toks = [tokenizer.encode(s)[2:] for s in until]
-
-        if "\n" in until:
-            until_toks.append(tokenizer.encode("\n")[2:])
 
         enc_prompts = encode(prompts)
         generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks, recompute_states = recompute_states, n_blocks = self.n_blocks)

@@ -36,7 +36,7 @@ args.max_batch_size = batch_size
 print("Loading model...")
 
 path = f"./weights/mistral"
-path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_15_19_23_27"
+path_weigths_EE = path + f"/EE_1_layers_middle_2_wsum_pos_15_19_23_27"
 plot_intermediate_states = True
 th_for_EE = 0.7
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
@@ -73,12 +73,12 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 
 datasets = ["triviaqa", "coqa", "truthfulqa_gen"]
 n_shots = [2, 0, 1]
-ranges_th = torch.tensor([[0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.5, 0.7, 1],
-                         [0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.5, 0.7, 1],
+ranges_th = torch.tensor([[0.25, 0.275, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 1],
+                         [0.275, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.7, 1],
                          [0.26, 0.27, 0.28, 0.29, 0.3, 0.35, 0.4, 0.5, 0.6, 1]]
                         )
 ranges_blocks = torch.tensor([[1, 2, 3, 4, 5],
-                              [1, 4, 6, 10, 12],
+                              [1, 2, 3, 5, 10],
                               [1, 4, 6, 10, 12]]
                              )
 for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, ranges_th, ranges_blocks):
@@ -89,6 +89,9 @@ for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, range
     lens_generated = []
 
     for th in range_th:
+
+        if th == -1:
+            continue
 
         print("Evaluate for th = ", th, " for ", dataset)
 
@@ -156,6 +159,9 @@ for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, range
 
     results_list = []
     for n_block in range_blocks:
+
+        if n_block == -1:
+            continue
 
         drops = range_blocks
 
