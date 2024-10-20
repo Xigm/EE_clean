@@ -235,6 +235,7 @@ class Mamba(ModelBase, nn.Module):
         num_last_tokens=0,
         load_cache = False,
         use_EE = False,
+        n_blocks = 64,
     ) -> torch.Tensor:
         
 
@@ -245,7 +246,7 @@ class Mamba(ModelBase, nn.Module):
 
         residual = None
         ee_index = 0
-        for i, layer in enumerate(self.model.backbone.layers):
+        for i, layer in enumerate(self.model.backbone.layers[:n_blocks-1]):
 
             if load_cache:
                 conv_state, ssm_state = layer.allocate_inference_cache(1, self.args.block_size)
@@ -299,6 +300,16 @@ class Mamba(ModelBase, nn.Module):
             # if not load_cache:
             #     self.intermediate_states[i+1, sum(seqlens)] = hidden_states.detach()
 
+        hidden_states, residual = self.model.backbone.layers[-1](
+                hidden_states, residual, inference_params=self.inference_params
+            )
+
+        # little patch
+        if 2 == len(residual.shape):
+            residual.unsqueeze_(0)
+        elif 1 == len(residual.shape):
+            residual.unsqueeze_(0).unsqueeze_(0)
+
         hidden_states = self.apply_layer_norm_fn(hidden_states, residual)
 
         if num_last_tokens > 0:
@@ -346,7 +357,7 @@ class Mamba(ModelBase, nn.Module):
         # self.to(device=device, dtype=dtype)
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 0, use_EE = False, until = None, recompute_states = False):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, repetition_penalty = 0, use_EE = False, until = None, n_blocks = 64, recompute_states = False):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -390,7 +401,7 @@ class Mamba(ModelBase, nn.Module):
 
         for i in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx[-1], use_EE = use_EE, seqlens = [len(idx)])
+            logits = self.forward_inference(idx[-1], use_EE = use_EE, seqlens = [len(idx)], n_blocks = n_blocks)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[0, -1, :] 
             

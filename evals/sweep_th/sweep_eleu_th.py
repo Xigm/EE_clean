@@ -21,7 +21,7 @@ import torch
 
 path_weights = "./weights/mistral/7B-v0.3"
 max_length = 2048*2
-max_gen_tokens = 32
+max_gen_tokens = 64
 device = "cuda"
 batch_size = 1
 recompute_states = True
@@ -81,7 +81,8 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 #                     max_length = max_length,
 #                     max_gen_tokens = max_gen_tokens,
 #                     temperature = 1.0,
-#                     top_k = None,
+#                     top_k =
+#  None,
 #                     recompute_states = False,
 #                     use_EE = True if ee_pos is not None else False,
 #                     device = device)
@@ -98,7 +99,9 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 #     )
 
 # range_th = torch.arange(0, 1.0, 0.1)
-range_th = torch.tensor([0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8])
+range_th = torch.tensor([0.2, 0.23, 0.26, 0.3, 0.35, 0.4, 0.5, 0.6, 1])
+# range_th = torch.tensor([0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.5, 0.7, 1])
+
 
 results_list = []
 exits_done = []
@@ -106,6 +109,10 @@ positions_exited = []
 lens_generated = []
 
 for th in range_th:
+
+    print("Threshold set to: ", th)
+
+    model.th = torch.ones(n_layer - 1) * th
 
     lm_obj = Mistral_7b(model=model,
         tokenizer = tokenizer,
@@ -118,7 +125,6 @@ for th in range_th:
         use_EE = True,
         device = device)
 
-    model.th = torch.ones(n_layer - 1) * th
 
     # for triviaqa in need to generete text
     # also for truthfulqa
@@ -127,12 +133,12 @@ for th in range_th:
     # triviaqa WITH n fewshots 2!!!!
     # coqa ONLY posible with n_shots = 0
     # truthfulqa_gen n_shots = 1
-    dataset = "coqa"
+    dataset = "truthfulqa_gen"
 
     results = simple_evaluate(
         model = lm_obj,
         tasks = [dataset],
-        num_fewshot = 0,
+        num_fewshot = 1,
     )
 
     results_list.append(results)
@@ -148,7 +154,7 @@ for th in range_th:
     lens_generated.append(lm_obj.model.lens_generated)
     lm_obj.model.lens_generated = []
 
-print(make_table(results_list[0]))
+    print(make_table(results))
 
 # save results list, the exits done and the positions, if it does not exist, create it
 if not os.path.exists(path_weigths_EE + f"/results/" + dataset + ("/recompute_states" if recompute_states else "/no_recomp")):

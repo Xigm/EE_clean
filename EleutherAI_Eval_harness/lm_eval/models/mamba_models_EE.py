@@ -20,7 +20,7 @@ from collections import namedtuple
 
 @register_model("mamba7b")
 class Mamba_7b(TemplateLM):
-    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, temperature = 1.0, top_k = None, use_EE = False, device = "cuda"):
+    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, temperature = 1.0, top_k = None, use_EE = False, n_blocks = 64, device = "cuda"):
         
         # set rank and world size to a single process, by default.
         self._rank = 0
@@ -36,6 +36,8 @@ class Mamba_7b(TemplateLM):
         self.max_length = max_length
 
         self.device = device
+
+        self.n_blocks = n_blocks
 
         self.inference_params = {"temperature" : temperature, "top_k" : top_k, "use_EE" : use_EE}
 
@@ -487,7 +489,7 @@ class Mamba_7b(TemplateLM):
             until_toks.append(tokenizer.encode("\n")[2:])
 
         enc_prompts = encode(prompts)
-        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks)
+        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks, n_blocks = self.n_blocks)
                
         res = decode(generated[len(enc_prompts):])
 

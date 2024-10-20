@@ -14,6 +14,7 @@ from models.mamba.models.wrapper_mamba_EE import Mamba
 from models.mamba.mistral_inference.args import MambaArgs
 from models.mistral.tokenizer import Tokenizer
 
+
 import json
 import torch
 
@@ -86,39 +87,48 @@ tokenizer = Tokenizer("./weights/mamba/mamba-codestral-7B-v0.1/tokenizer.model.v
 # tokenizer = MistralTokenizer.v3().instruct_tokenizer
 
 
-# range_th = torch.arange(0, 1.0, 0.1)
-range_th = torch.tensor([0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8])
-# range_th = torch.tensor([0.2, 0.23, 0.26, 0.3, 0.35, 0.4, 0.5, 0.6, 1])
-# range_th = torch.tensor([0.7, 1])
+drops = [2,8,12,16,24,32]
 results_list = []
-exits_done = []
-positions_exited = []
-lens_generated = []
+for layers_dropped in drops:
 
-for th in range_th:
+    lm_obj = Mamba_7b(model=model,
+                        tokenizer = tokenizer,
+                        batch_size=batch_size,
+                        max_length = max_length,
+                        max_gen_tokens = max_gen_tokens,
+                        temperature = 1.0,
+                        top_k = None,
+                        use_EE = False,
+                        n_blocks = n_layer - layers_dropped,
+                        device = device)
 
-    model.th = torch.ones(n_layer - 1) * th
+    # optional: the task_manager indexes tasks including ones
+    # specified by the user through `include_path`.
+    # task_manager = lm_eval.tasks.TaskManager(
+    #     include_path="/path/to/custom/yaml"
+    #     )
 
-    lm_obj = Mamba_7b(  model=model,
-                    tokenizer = tokenizer,
-                    batch_size=batch_size,
-                    max_length = max_length,
-                    max_gen_tokens = max_gen_tokens,
-                    temperature = 1.0,
-                    top_k = None,
-                    use_EE = True if ee_pos is not None else False,
-                    device = device)
+    # To get a task dict for `evaluate`
+    # task_dict = get_task_dict(
+    #     ["truthfulqa"]
+    #     )
+
+    print("Evaluating...")
+    # results = evaluate(
+    #     lm=lm_obj,
+    #     task_dict=task_dict,
+    #     # num_fewshot=3,
+    # )
 
 
     # for triviaqa in need to generete text
     # also for truthfulqa
     # nq_open
 
-    # triviaqa WITH n fewshots 2!!!!
-    # coqa ONLY posible with n_shots = 0
-    # truthfulqa_gen n_shots = 1
+    # triviaqa
+    # coqa
+    # generate_until
     dataset = "truthfulqa_gen"
-
     results = simple_evaluate(
         model = lm_obj,
         tasks = [dataset],
@@ -127,37 +137,16 @@ for th in range_th:
 
     results_list.append(results)
 
-    if th == 1:
-        exits_done.append(0)
-        positions_exited.append(None)
-    else:
-        exits_done.append(lm_obj.model.exits_done)
-        lm_obj.model.exits_done = []
-        positions_exited.append(lm_obj.model.positions_exit)
-        lm_obj.model.positions_exit = []
-    lens_generated.append(lm_obj.model.lens_generated)
-    lm_obj.model.lens_generated = []
 
     print(make_table(results))
 
-# print(make_table(results_list[0]))
 
 # save results list, the exits done and the positions, if it does not exist, create it
-if not os.path.exists(path_weigths_EE + f"/results/" + dataset + ("/recompute_states" if recompute_states else "/no_recomp")):
-    os.makedirs(path_weigths_EE + f"/results/" + dataset + ("/recompute_states" if recompute_states else "/no_recomp"))
+if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
+    os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
 
-with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp") +"/results_list.json", "w") as f:
+with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/results_list.json", "w") as f:
     json.dump(results_list, f)
 
-with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+ "/exits_done.json", "w") as f:
-    json.dump(exits_done, f)
-
-with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+"/positions_exited.json", "w") as f:
-    json.dump(positions_exited, f)
-
-with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+"/lens_generated.json", "w") as f: 
-    json.dump(lens_generated, f)
-
-# save also the th swept
-with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+"/th_swept.json", "w") as f:
-    json.dump(range_th.tolist(), f)
+with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+"/layers_dropped.json", "w") as f:
+    json.dump(drops, f)

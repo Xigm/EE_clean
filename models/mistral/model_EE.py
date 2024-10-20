@@ -422,6 +422,7 @@ class Transformer(nn.Module):
         input_ids: torch.Tensor,
         seqlens: List[int],
         use_EE = False,
+        n_blocks = 32,
     ) -> torch.Tensor:
         # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
@@ -434,7 +435,7 @@ class Transformer(nn.Module):
         self.intermediate_states[0, sum(seqlens) - 1] = h.detach()
 
         ee_index = 0
-        for i, layer in enumerate(self.layers):
+        for i, layer in enumerate(self.layers[:n_blocks-1]):
 
             h = layer.forward_inference(h, freqs_cis)
 
@@ -476,13 +477,16 @@ class Transformer(nn.Module):
                         # self.intermediate_states[0, j+1, pos - 1] = x.detach()
                         # self.intermediate_states[0, j+1, pos - 1] = x.detach()
                         
-                    h = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
+                    # h = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
 
                     break
                     
                 ee_index += 1
                 
             self.intermediate_states[i+1, sum(seqlens) - 1] = h.detach()
+
+        # if n_blocks != 32:
+        h = self.layers[-1].forward_inference(h, freqs_cis, use_EE = False)                        
 
         return self.output(self.norm(h)).float()
     
@@ -492,7 +496,7 @@ class Transformer(nn.Module):
             del layer.attention.v
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False, repetition_penalty = 0):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_EE = False, until = None, recompute_states = False, repetition_penalty = 0, n_blocks = 32):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -529,7 +533,7 @@ class Transformer(nn.Module):
 
         for _ in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx_next, seqlens=[idx.shape[0]], use_EE = use_EE)
+            logits = self.forward_inference(idx_next, seqlens=[idx.shape[0]], use_EE = use_EE, n_blocks = n_blocks)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[-1, :]
             
