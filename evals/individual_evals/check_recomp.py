@@ -28,7 +28,7 @@ print("Loading model...")
 path = f"./weights/mamba"
 path_weigths_EE = path + f"/EE_1_layers_middle_2_pos_32_40_48_56"
 plot_intermediate_states = True
-th_for_EE = 0.5
+th_for_EE = 0.35
 ee_pos = [int(p) for p in path_weigths_EE.split("_pos_")[-1].split("_")]
 # ee_pos = None
 recompute_states = True
@@ -72,43 +72,46 @@ tokenizer = Tokenizer("./weights/mamba/mamba-codestral-7B-v0.1/tokenizer.model.v
 # - `Your_LM.loglikelihood()`
 # - `Your_LM.loglikelihood_rolling()`
 # - `Your_LM.generate_until()`
-lm_obj = Mamba_7b(  model=model,
-                    tokenizer = tokenizer,
-                    batch_size=batch_size,
-                    max_length = max_length,
-                    max_gen_tokens = max_gen_tokens,
-                    temperature = 1.0,
-                    top_k = None,
-                    use_EE = True if ee_pos is not None else False,
-                    recompute_states = recompute_states,
-                    device = device)
 
-# optional: the task_manager indexes tasks including ones
-# specified by the user through `include_path`.
-# task_manager = lm_eval.tasks.TaskManager(
-#     include_path="/path/to/custom/yaml"
-#     )
+for recompute_states in [True, False]:
 
-# To get a task dict for `evaluate`
-# task_dict = get_task_dict(
-#     ["truthfulqa"]
-#     )
+    lm_obj = Mamba_7b(  model=model,
+                        tokenizer = tokenizer,
+                        batch_size=batch_size,
+                        max_length = max_length,
+                        max_gen_tokens = max_gen_tokens,
+                        temperature = 1.0,
+                        top_k = None,
+                        use_EE = True if ee_pos is not None else False,
+                        recompute_states = recompute_states,
+                        device = device)
 
-print("Evaluating...")  
-# results = evaluate(
-#     lm=lm_obj,
-#     task_dict=task_dict,
-#     # num_fewshot=3,
-# )
+    # optional: the task_manager indexes tasks including ones
+    # specified by the user through `include_path`.
+    # task_manager = lm_eval.tasks.TaskManager(
+    #     include_path="/path/to/custom/yaml"
+    #     )
+
+    # To get a task dict for `evaluate`
+    # task_dict = get_task_dict(
+    #     ["truthfulqa"]
+    #     )
+
+    print("Evaluating...")  
+    # results = evaluate(
+    #     lm=lm_obj,
+    #     task_dict=task_dict,
+    #     # num_fewshot=3,
+    # )
 
 
-# triviaqa
-# coqa has to be with n_shots = 0
-# truthfulqa
-results = simple_evaluate(
-    model = lm_obj,
-    tasks = ["triviaqa"],
-    num_fewshot = 2,
-)
+    # triviaqa
+    # coqa has to be with n_shots = 0
+    # truthfulqa
+    results = simple_evaluate(
+        model = lm_obj,
+        tasks = ["coqa"],
+        num_fewshot = 0,
+    )
 
-print(make_table(results))
+    print(make_table(results))

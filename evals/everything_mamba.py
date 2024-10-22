@@ -86,17 +86,20 @@ tokenizer = Tokenizer("./weights/mamba/mamba-codestral-7B-v0.1/tokenizer.model.v
 
 
 datasets = ["triviaqa", "coqa", "truthfulqa_gen"]
+datasets = ["truthfulqa_gen"]
 n_shots = [2, 0, 1]
 ranges_th = torch.tensor([[0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.5, 0.7, 1],
                          [0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.5, 0.7, 1],
                          [0.26, 0.27, 0.28, 0.29, 0.3, 0.35, 0.4, 0.5, 0.6, 1]]
                         )
-ranges_blocks = torch.tensor([[1, 2, 3, 4, 5],
-                              [1, 4, 6, 10, 12],
-                              [1, 4, 6, 10, 12]]
+ranges_blocks = torch.tensor([[1, 2, 3, 4, 5, -1],
+                              [1, 4, 6, 10, 12, 24],
+                              [1, 4, 6, 10, 12, -1]]
                              )
 for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, ranges_th, ranges_blocks):
 
+    if dataset == "triviaqa":
+        continue
     
     results_list = []
     exits_done = []
@@ -181,7 +184,8 @@ for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, range
                             max_gen_tokens = max_gen_tokens,
                             temperature = 1.0,
                             top_k = None,
-                            recompute_states = True,
+
+
                             use_EE = False,
                             n_blocks = n_layer - n_block,
                             device = device)

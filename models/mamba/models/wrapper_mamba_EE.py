@@ -91,6 +91,37 @@ class Mamba(ModelBase, nn.Module):
             )
         
         return hidden_states
+    
+    def forward_batch(self, input_ids: torch.Tensor, seqlens: List[int] = None, cache = None, train_EE = False, num_last_tokens=0, n_blocks = 64):
+
+
+        hidden_states = self.model.backbone.embedding(input_ids)
+        residual = None
+        for i, layer in enumerate(self.model.backbone.layers[:n_blocks-1]):
+            hidden_states, residual = layer(
+                hidden_states, residual, inference_params=None
+            )
+
+            # little patch
+            # if len(hidden_states.shape) != len(residual.shape):
+            #     residual.unsqueeze_(0)
+
+        hidden_states, residual = self.model.backbone.layers[-1](
+                hidden_states, residual, inference_params=None
+            )
+
+        if not self.model.backbone.fused_add_norm:
+            residual = (hidden_states + residual) if residual is not None else hidden_states
+            hidden_states = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+        else:
+
+            hidden_states = self.apply_layer_norm_fn(hidden_states, residual)
+
+        if num_last_tokens > 0:
+            hidden_states = hidden_states[:, -num_last_tokens:]
+        lm_logits = self.model.lm_head(hidden_states)
+    
+        return lm_logits
 
     def forward(
         self,
@@ -99,6 +130,7 @@ class Mamba(ModelBase, nn.Module):
         cache = None,  # not supported for now
         train_EE = False,  # not supported for now
         num_last_tokens=0,
+        n_blocks = 64,
     ) -> torch.Tensor:
         
         
@@ -111,7 +143,7 @@ class Mamba(ModelBase, nn.Module):
         hidden_states = self.model.backbone.embedding(input_ids)
         residual = None
         ee_index = 0
-        for i, layer in enumerate(self.model.backbone.layers):
+        for i, layer in enumerate(self.model.backbone.layers[:n_blocks-1]):
             hidden_states, residual = layer(
                 hidden_states, residual, inference_params=None
             )
@@ -127,6 +159,9 @@ class Mamba(ModelBase, nn.Module):
                 early_exits_topk[0, :shape_ee[1], ee_index] = torch.topk(self.model.lm_head(self.apply_layer_norm_fn(hidden_states.detach(), residual.detach())).float(), k, dim = 2)[1]
                 ee_index += 1
 
+        hidden_states, residual = self.model.backbone.layers[-1](
+                hidden_states, residual, inference_params=None
+            )
 
         if not self.model.backbone.fused_add_norm:
             residual = (hidden_states + residual) if residual is not None else hidden_states
@@ -234,6 +269,7 @@ class Mamba(ModelBase, nn.Module):
         cache = None,  # not supported for now
         num_last_tokens=0,
         load_cache = False,
+        recomputate_states = False,
         use_EE = False,
         n_blocks = 64,
     ) -> torch.Tensor:
@@ -281,9 +317,11 @@ class Mamba(ModelBase, nn.Module):
                     self.exits_done.append(i + 1)
                     self.positions_exit.append(sum(seqlens))
 
-                    hidden_states, residual = self.model.backbone.layers[-1](
-                        hidden_states, residual, inference_params=self.inference_params
-                    )
+                    if recomputate_states:
+                        for j in range(i, n_blocks-1):
+                            self.model.backbone.layers[j](
+                                hidden_states, residual, inference_params=self.inference_params, recomputate_states = True
+                            )
 
                     # little patch
                     if 2 == len(residual.shape):
@@ -401,7 +439,7 @@ class Mamba(ModelBase, nn.Module):
 
         for i in range(max_new_tokens):
             # forward the model to get the logits for the index in the sequence
-            logits = self.forward_inference(idx[-1], use_EE = use_EE, seqlens = [len(idx)], n_blocks = n_blocks)
+            logits = self.forward_inference(idx[-1], use_EE = use_EE, seqlens = [len(idx)], n_blocks = n_blocks, recomputate_states=recompute_states)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[0, -1, :] 
             
@@ -443,7 +481,10 @@ class Mamba(ModelBase, nn.Module):
 
         if not hasattr(self, 'lens_generated'):
             self.lens_generated = []
-        self.lens_generated.append(idx.shape[0] - pos_prompt)
+        if break_loop == 0:
+            self.lens_generated.append(-1)
+        else:
+            self.lens_generated.append(idx.shape[0] - pos_prompt)
 
         return idx
 

@@ -72,16 +72,22 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 # range_th = torch.tensor([1, 0.7])
 
 datasets = ["triviaqa", "coqa", "truthfulqa_gen"]
+datasets = ["truthfulqa_gen"]
 n_shots = [2, 0, 1]
-ranges_th = torch.tensor([[0.25, 0.275, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 1],
+ranges_th = torch.tensor(
+                        [[0.25, 0.275, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 1],
                          [0.275, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 0.7, 1],
                          [0.26, 0.27, 0.28, 0.29, 0.3, 0.35, 0.4, 0.5, 0.6, 1]]
                         )
-ranges_blocks = torch.tensor([[1, 2, 3, 4, 5],
+ranges_blocks = torch.tensor(
+                             [[1, 2, 3, 4, 5],
                               [1, 2, 3, 5, 10],
                               [1, 4, 6, 10, 12]]
-                             )
+                            )
+
 for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, ranges_th, ranges_blocks):
+
+    recompute_states = True
 
     results_list = []
     exits_done = []
@@ -93,7 +99,82 @@ for dataset,fewshots_set, range_th, range_blocks in zip(datasets, n_shots, range
         if th == -1:
             continue
 
-        print("Evaluate for th = ", th, " for ", dataset)
+        print("Evaluate for th = ", th, " for ", dataset, "recomp")
+
+        model.th = torch.ones(n_layer - 1) * th
+
+        lm_obj = Mistral_7b(model=model,
+            tokenizer = tokenizer,
+            batch_size=batch_size,
+            max_length = max_length,
+            max_gen_tokens = max_gen_tokens,
+            temperature = 1.0,
+            top_k = None,
+            recompute_states = recompute_states,
+            use_EE = True,
+            device = device)
+
+        # triviaqa WITH n fewshots 2!!!!
+        # coqa ONLY posible with n_shots = 0
+        # truthfulqa_gen n_shots = 1
+        # dataset = "truthfulqa_gen"
+
+        results = simple_evaluate(
+            model = lm_obj,
+            tasks = [dataset],
+            num_fewshot = fewshots_set,
+        )
+
+        results_list.append(results)
+
+        print(make_table(results))
+
+        if th == 1:
+            exits_done.append(0)
+            positions_exited.append(None)
+        else:
+            exits_done.append(lm_obj.model.exits_done)
+            lm_obj.model.exits_done = []
+            positions_exited.append(lm_obj.model.positions_exit)
+            lm_obj.model.positions_exit = []
+        lens_generated.append(lm_obj.model.lens_generated)
+        lm_obj.model.lens_generated = []
+
+    # print(make_table(results_list[0]))
+
+    # save results list, the exits done and the positions, if it does not exist, create it
+    if not os.path.exists(path_weigths_EE + f"/results/" + dataset + ("/recompute_states" if recompute_states else "/no_recomp")):
+        os.makedirs(path_weigths_EE + f"/results/" + dataset + ("/recompute_states" if recompute_states else "/no_recomp"))
+
+    with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp") +"/results_list.json", "w") as f:
+        json.dump(results_list, f)
+
+    with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+ "/exits_done.json", "w") as f:
+        json.dump(exits_done, f)
+
+    with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+"/positions_exited.json", "w") as f:
+        json.dump(positions_exited, f)
+
+    with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+"/lens_generated.json", "w") as f: 
+        json.dump(lens_generated, f)
+
+    # save also the th swept
+    with open(path_weigths_EE + f"/results/"+dataset+ ("/recompute_states" if recompute_states else "/no_recomp")+"/th_swept.json", "w") as f:
+        json.dump(range_th.tolist(), f)
+
+    
+    results_list = []
+    exits_done = []
+    positions_exited = []
+    lens_generated = []
+
+    recompute_states = False
+    for th in range_th:
+
+        if th == -1:
+            continue
+
+        print("Evaluate for th = ", th, " for ", dataset, "no recomp")
 
         model.th = torch.ones(n_layer - 1) * th
 

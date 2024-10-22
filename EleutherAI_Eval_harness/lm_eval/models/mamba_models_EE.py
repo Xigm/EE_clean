@@ -20,7 +20,7 @@ from collections import namedtuple
 
 @register_model("mamba7b")
 class Mamba_7b(TemplateLM):
-    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, temperature = 1.0, top_k = None, use_EE = False, n_blocks = 64, device = "cuda"):
+    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, temperature = 1.0, top_k = None, recompute_states = False, use_EE = False, n_blocks = 64, device = "cuda"):
         
         # set rank and world size to a single process, by default.
         self._rank = 0
@@ -36,6 +36,8 @@ class Mamba_7b(TemplateLM):
         self.max_length = max_length
 
         self.device = device
+
+        self.recompute_states = recompute_states
 
         self.n_blocks = n_blocks
 
@@ -67,10 +69,10 @@ class Mamba_7b(TemplateLM):
         with torch.no_grad():
             positions = torch.arange(inputs.size(1), device=inputs.device)
             # for the update of july, input in batch size 1, avoiding first dimension
-            inputs = inputs[0]
+            # inputs = inputs[0]
 
             positions = [len(inputs)]
-            return self.model(inputs, positions, **kwargs)
+            return self.model.forward_batch(inputs, positions, n_blocks = self.n_blocks, **kwargs)
 
     # def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
         
@@ -205,11 +207,11 @@ class Mamba_7b(TemplateLM):
             call_kwargs = {}
             batched_inps = pad_and_concat(
                 padding_len_inp, inps, padding_side="right"
-            ).unsqueeze(0)  # [batch, padding_len_inp]
+            )  # [batch, padding_len_inp]
 
             multi_logits = F.log_softmax(
-                self._model_call(batched_inps, **call_kwargs)[0], dim=-1
-            ).unsqueeze(0)  # [batch, padding_length (inp or cont), vocab]
+                self._model_call(batched_inps, **call_kwargs), dim=-1
+            )  # [batch, padding_length (inp or cont), vocab]
 
             for (request_str, ctx_tokens, _), logits, inplen, cont_toks in zip(
                 chunk, multi_logits, inplens, cont_toks_list
@@ -221,9 +223,9 @@ class Mamba_7b(TemplateLM):
                 # also discards + checks for "virtual tokens" in the causal LM's input window
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
-                    inplen + (logits.shape[1] - padding_len_inp)
+                    inplen + (logits.shape[0] - padding_len_inp)
                 )
-                logits = logits[:1,ctx_len - contlen : ctx_len]
+                logits = logits[ctx_len - contlen : ctx_len]
                 # logits = logits.unsqueeze(0)  # [1, contlen, vocab]
 
                 # Check if per-token argmax is exactly equal to continuation
@@ -242,15 +244,15 @@ class Mamba_7b(TemplateLM):
                 ):
                     cont_toks = torch.tensor(
                         cont_toks, dtype=torch.long, device=self.device
-                    ).unsqueeze(0)  # [1, seq]
+                    ) # [1, seq]
                     max_equal = (greedy_tokens == cont_toks).all()
 
                     # Obtain log-probs at the corresponding continuation token indices
                     # last_token_slice = logits[:, -1, :]
                     # logits here are [1, contlen, vocab]
-                    logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1))
+                    logits = torch.gather(logits.squeeze(), 0, cont_toks)
                     # logits = torch.gather(logits.squeeze(0), 1, cont_toks)
-                    logits = logits.squeeze(-1)  # [1, seq]
+                    # logits = logits.squeeze(-1)  # [1, seq]
 
                     # Answer: (log prob, is-exact-match)
                     answer = (float(logits.sum()), bool(max_equal))
@@ -489,7 +491,7 @@ class Mamba_7b(TemplateLM):
             until_toks.append(tokenizer.encode("\n")[2:])
 
         enc_prompts = encode(prompts)
-        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks, n_blocks = self.n_blocks)
+        generated = model.generate(enc_prompts, max_tokens, temperature=temperature, top_k=top_k, use_EE = use_EE, until = until_toks, n_blocks = self.n_blocks, recompute_states = self.recompute_states)
                
         res = decode(generated[len(enc_prompts):])
 
