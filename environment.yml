@@ -61,7 +61,6 @@ dependencies:
   - mkl_random=1.2.4=py311hdb19cb5_0
   - mysql=5.7.24=h721c034_2
   - ncurses=6.4=h6a678d5_0
-  - numpy-base=1.26.4=py311hf175353_0
   - openjpeg=2.5.2=he7f1fd0_0
   - openssl=3.0.14=h5eee18b_0
   - packaging=24.1=py311h06a4308_0

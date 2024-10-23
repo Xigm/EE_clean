@@ -76,7 +76,7 @@ class Mistral_7b(TemplateLM):
             inputs = inputs[0]
 
             positions = [len(inputs)]
-            outputs = self.model(inputs, positions,**kwargs)
+            outputs = self.model(inputs, positions, n_blocks = self.n_blocks,**kwargs)
 
             return outputs[0]
 

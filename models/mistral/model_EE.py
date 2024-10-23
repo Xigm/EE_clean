@@ -302,6 +302,7 @@ class Transformer(nn.Module):
         input_ids: torch.Tensor,
         load_caches = False,
         train_EE = False,
+        n_blocks = 32,
     ) -> torch.Tensor:
         
         seqlens = [input_ids.shape[0]]
@@ -321,7 +322,7 @@ class Transformer(nn.Module):
             early_exits_topk = torch.zeros((1, self.args.block_size, len(self.args.ee_pos), k), device = input_ids.device)
         
         ee_index = 0
-        for i,layer in enumerate(self.layers):
+        for i,layer in enumerate(self.layers[:n_blocks-1]):
 
             if train_EE and i != self.args.n_layers - 1:
                 h = layer(h, freqs_cis, load_caches)
@@ -336,7 +337,9 @@ class Transformer(nn.Module):
                 h = layer(h, freqs_cis, load_caches)
 
             self.intermediate_states[i+1, :sum(seqlens)] = h.detach()
-            
+
+        h = self.layers[-1](h, freqs_cis, load_caches)
+        
         logits = self.output(self.norm(h)).float()
 
         if train_EE:

@@ -1,21 +1,21 @@
 import json
 import os
 import sys
-sys.path.append(os.path.join(sys.path[0], '../../'))
+sys.path.append(os.path.join(sys.path[0], '../../../'))
 # Define the path to the folder where the files are located
-# path = f"./weights/mistral"
-# path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_15_19_23_27"
-# dataset = "coqa"
-# submetric = "acc" # acc, diff, max
-# recomputation = True
-# baseline = True
-
-path = "./weights/mamba"
-path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_31_39_47_55"
+path = f"./weights/mistral"
+path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_15_19_23_27"
 dataset = "coqa"
-recomputation = False
 submetric = "acc" # acc, diff, max
+recomputation = True
 baseline = True
+
+# path = "./weights/mamba"
+# path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_31_39_47_55"
+# dataset = "coqa"
+# recomputation = False
+# submetric = "acc" # acc, diff, max
+# baseline = True
 
 recomp = "/recompute_states" if recomputation else "/no_recomp" 
 penalize = 4/24 if recomputation else 0.0
