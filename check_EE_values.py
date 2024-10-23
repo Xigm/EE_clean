@@ -61,7 +61,7 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 k = 50
 least = []
 most = []
-for i,ee in enumerate(ee_pos[:1]):
+for i,ee in enumerate(ee_pos):
     weigths = model.ee[i].c_fc.weight
     print(weigths)
 

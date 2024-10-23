@@ -72,7 +72,6 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 # range_th = torch.tensor([1, 0.7])
 
 datasets = ["triviaqa", "coqa", "truthfulqa_gen"]
-datasets = ["truthfulqa_gen"]
 n_shots = [2, 0, 1]
 ranges_th = torch.tensor(
                         [[0.25, 0.275, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.45, 1],
