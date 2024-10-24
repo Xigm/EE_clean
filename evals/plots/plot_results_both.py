@@ -3,22 +3,23 @@ import os
 import sys
 sys.path.append(os.path.join(sys.path[0], '../../../'))
 # Define the path to the folder where the files are located
-path = f"./weights/mistral"
-path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_15_19_23_27"
-dataset = "truthfulqa_gen"
-submetric = "diff" # acc, diff, max
-baseline = True
-
-# path = "./weights/mamba"
-# path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_31_39_47_55"
-# dataset = "coqa"
-# recomputation = False
-# submetric = "acc" # acc, diff, max
+# path = f"./weights/mistral"
+# path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_15_19_23_27"
+# dataset = "truthfulqa_gen"
+# submetric = "diff" # acc, diff, max
 # baseline = True
+
+path = "./weights/mamba"
+path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_31_39_47_55"
+dataset = "coqa"
+recomputation = True
+submetric = "acc" # acc, diff, max
+baseline = True
 
 recomp = "/recompute_states"
 norecomp = "/no_recomp" 
-penalize = 4/24
+penalize_mistral = 4/24
+penalize_mamba = 4/24
 
 # Load the results_list from the JSON file
 with open(f"{path_weights_EE}/results/"+dataset+recomp+"/results_list.json", "r") as f:
@@ -80,6 +81,7 @@ speedup_r = 0
 skip_recomp = []
 skip_norecomp = []
 threshold_deg_res = 100 if dataset == "truthfulqa_gen" else 35
+threshold_deg_res_mamba = 411 if dataset == "truthfulqa_gen" else 100
 if "mistral" in path_weights_EE:
     for i, th in enumerate(range_th):
         # recomp
@@ -99,7 +101,7 @@ if "mistral" in path_weights_EE:
             else:
                 total_blocks = sum(torch.tensor(lens_generated[i], dtype = torch.float) - 1) * n_layers
                 blocks_ignored = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float) + 1)
-                pen = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float) + 1)*penalize
+                pen = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float) + 1)*penalize_mistral
                 # pen = deg_res*min(exits_done[i])*n_layers
                 # pen = 0
                 
@@ -113,6 +115,7 @@ if "mistral" in path_weights_EE:
             deg_res = sum(lens == -1)
             lens[lens == -1] = (lens+1).mean()
 
+
             if deg_res > threshold_deg_res:
                 skip_norecomp.append(i)
             else:
@@ -125,17 +128,43 @@ if "mistral" in path_weights_EE:
 
 elif "mamba" in path_weights_EE:
     for i, th in enumerate(range_th):
+
         if exits_done[i] == [] or exits_done[i] == 0:
             speedups_recomp.append(1)
         else:
-            if i == 0:
+            lens = torch.tensor(lens_generated[i], dtype = torch.float)
+            deg_res = sum(lens == -1)
+            lens[lens == -1] = 32 if dataset == "truthfulqa_gen" else lens.mean()
+
+            print(deg_res)
+
+            if deg_res > threshold_deg_res_mamba:
                 skip_recomp.append(i)
             else:
-                total_blocks = sum(torch.tensor(lens_generated[i], dtype = torch.float) - 1) * n_layers
+                total_blocks = sum(torch.tensor(lens, dtype = torch.float) - 1) * n_layers
                 blocks_ignored = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float))
+                pen = sum(n_layers - torch.tensor(exits_done[i], dtype = torch.float) + 1)*penalize_mamba
+                # pen = deg_res*min(exits_done[i])*n_layers
+                # pen = 0
+                
+                speedup_r = total_blocks / (total_blocks - blocks_ignored + pen)
+                speedups_recomp.append(speedup_r)
+
+
+        if exits_done_norecomp[i] == [] or exits_done_norecomp[i] == 0:
+            speedups_norecomp.append(1)
+        else:
+            lens = torch.tensor(lens_generated_norecomp[i], dtype = torch.float)
+            deg_res = sum(lens == -1)
+            lens[lens == -1] = 32 if dataset == "truthfulqa_gen" else lens.mean()
+            if deg_res > threshold_deg_res_mamba:
+                skip_norecomp.append(i)
+            else:
+                total_blocks = sum(torch.tensor(lens, dtype = torch.float) - 1) * n_layers
+                blocks_ignored = sum(n_layers - torch.tensor(exits_done_norecomp[i], dtype = torch.float))
 
                 speedup_r = total_blocks / (total_blocks - blocks_ignored)
-                speedups_recomp.append(speedup_r)
+                speedups_norecomp.append(speedup_r)
         
         
             # if recomp:
@@ -160,6 +189,14 @@ for i,metric in enumerate(metrics):
     metric_values_norecomp.append([r["results"][dataset][metric] for i,r in enumerate(results_list_norecomp) if i not in skip_norecomp])
     if baseline:
         bl_values.append([r["results"][dataset][metric] for r in results_list_baseline])
+
+# filter out bl_values where layers_dropped_baseline is -1
+bl_clean = []
+if baseline:
+    for j,metric in enumerate(metrics):
+        bl_clean.append([bl for i, bl in enumerate(bl_values[j]) if layers_dropped_baseline[i] != -1])
+bl_values = bl_clean
+layers_dropped_baseline = [l for l in layers_dropped_baseline if l != -1]
 
 range_th_recomp = [th for i, th in enumerate(range_th) if i not in skip_recomp]
 range_th_norecomp = [th for i, th in enumerate(range_th) if i not in skip_norecomp]

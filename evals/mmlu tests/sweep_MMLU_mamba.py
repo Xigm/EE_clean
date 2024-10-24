@@ -88,6 +88,7 @@ tokenizer = Tokenizer("./weights/mamba/mamba-codestral-7B-v0.1/tokenizer.model.v
 
 
 drops = torch.arange(0, 63, 1)
+n_shots = 5
 results_list = []
 for layers_dropped in drops:
 
@@ -135,7 +136,7 @@ for layers_dropped in drops:
     results = simple_evaluate(
         model = lm_obj,
         tasks = [dataset],
-        num_fewshot = 0,
+        num_fewshot = n_shots,
     )
 
     results_list.append(results)
@@ -147,8 +148,8 @@ for layers_dropped in drops:
 if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
     os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/results_list.json", "w") as f:
+with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/" + n_shots + "_results_list.json", "w") as f:
     json.dump(results_list.tolist(), f)
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+"/layers_dropped.json", "w") as f:
+with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+"/" + n_shots + "_layers_dropped.json", "w") as f:
     json.dump(drops.tolist(), f)

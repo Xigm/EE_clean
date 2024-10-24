@@ -72,8 +72,9 @@ class Mistral_7b(TemplateLM):
     def _model_call(self, inputs, **kwargs):
         with torch.no_grad():
             positions = torch.arange(inputs.size(1), device=inputs.device)
-            # for the update of july, input in batch size 1, avoiding first dimension
-            inputs = inputs[0]
+            # for the update of july, input in batch size 1, avoiding first dimension.
+            if inputs.shape[0] == 1:
+                inputs = inputs[0]
 
             positions = [len(inputs)]
             outputs = self.model(inputs, positions, n_blocks = self.n_blocks,**kwargs)

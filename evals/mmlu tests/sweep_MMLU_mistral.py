@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.join(sys.path[0], '../../EleutherAI_Eval_harness'))
 sys.path.append(os.path.join(sys.path[0], '../../'))
 
-from lm_eval.models.mistral_models_EE import Mistral_7b
+from lm_eval.models.mistral_models import Mistral_7b
 from lm_eval import evaluate, simple_evaluate
 from lm_eval.tasks import get_task_dict
 from lm_eval.utils import make_table
@@ -11,7 +11,7 @@ from lm_eval.utils import make_table
 # os.chdir(os.path.join(sys.path[0], './EE_Clean'))
 
 from models.mistral.model import ModelArgs
-from models.mistral.model_EE import Transformer
+from models.mistral.model import Transformer
 from models.mistral.tokenizer import Tokenizer
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
@@ -24,7 +24,7 @@ path_weights = "./weights/mistral/7B-v0.3"
 max_length = 2048*2
 max_gen_tokens = 64
 device = "cuda"
-batch_size = 1
+batch_size = 8
 
 # create your model (could be running finetuning with some custom modeling code)
 if path_weights is not None:
@@ -54,11 +54,11 @@ print("Loading weights...")
 model.from_pretrained(path + "/consolidated.safetensors")
 n_layer = model.args.n_layers
 
-model.th = model.th * th_for_EE
+# model.th = model.th * th_for_EE
 
-if ee_pos is not None:
-    for i in range(len(ee_pos)):
-        model.ee[i].load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
+# if ee_pos is not None:
+#     for i in range(len(ee_pos)):
+#         model.ee[i].load_state_dict(torch.load(f"{path_weigths_EE}/layer_{i}_EE"))
 
 print("Sending to GPU...")
 model.eval()
@@ -71,6 +71,7 @@ tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 
 
 drops = torch.arange(0, 31, 1)
+n_shots = 5
 results_list = []
 for layers_dropped in drops:
 
@@ -83,7 +84,6 @@ for layers_dropped in drops:
                         max_gen_tokens = max_gen_tokens,
                         temperature = 1.0,
                         top_k = None,
-                        use_EE = False,
                         n_blocks = n_layer - layers_dropped,
                         device = device)
 
@@ -117,7 +117,7 @@ for layers_dropped in drops:
     results = simple_evaluate(
         model = lm_obj,
         tasks = [dataset],
-        num_fewshot = 0,
+        num_fewshot = n_shots,
     )
 
     results_list.append(results)
@@ -129,8 +129,8 @@ for layers_dropped in drops:
 if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
     os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/results_list.json", "w") as f:
+with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/"+ str(n_shots)+"_results_list.json", "w") as f:
     json.dump(results_list, f)
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+"/layers_dropped.json", "w") as f:
+with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+ +"/"+ str(n_shots)+"_layers_dropped.json", "w") as f:
     json.dump(drops.tolist(), f)

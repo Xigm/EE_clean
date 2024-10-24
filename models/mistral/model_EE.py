@@ -301,6 +301,7 @@ class Transformer(nn.Module):
         self,
         input_ids: torch.Tensor,
         load_caches = False,
+        save_intermediate_states = False,
         train_EE = False,
         n_blocks = 32,
     ) -> torch.Tensor:
@@ -314,7 +315,8 @@ class Transformer(nn.Module):
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
-        self.intermediate_states[0, :sum(seqlens)] = h.detach()
+        if save_intermediate_states:
+            self.intermediate_states[0, :sum(seqlens)] = h.detach()
 
         if train_EE:
             k = self.k
@@ -336,7 +338,8 @@ class Transformer(nn.Module):
             else:
                 h = layer(h, freqs_cis, load_caches)
 
-            self.intermediate_states[i+1, :sum(seqlens)] = h.detach()
+            if save_intermediate_states:
+                self.intermediate_states[i+1, :sum(seqlens)] = h.detach()
 
         h = self.layers[-1](h, freqs_cis, load_caches)
         

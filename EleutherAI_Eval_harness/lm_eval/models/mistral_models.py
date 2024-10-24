@@ -17,12 +17,19 @@ from tqdm import tqdm
 
 @register_model("mistral7b")
 class Mistral_7b(TemplateLM):
-    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, device = "cuda"):
+    def __init__(self, model, tokenizer, batch_size=4, max_length = 2048, max_gen_tokens = 256, device = "cuda",
+                        temperature = 1.0,
+                        top_k = None,
+                        n_blocks = 32):
         
         # set rank and world size to a single process, by default.
         self._rank = 0
         self._world_size = 1
         self.cache_hook = CacheHook(None)
+
+        self.temperature = temperature
+        self.top_k = top_k
+        self.n_blocks = n_blocks
 
         self.model = model
         self.tokenizer = tokenizer
@@ -57,11 +64,11 @@ class Mistral_7b(TemplateLM):
     
     def _model_call(self, inputs, **kwargs):
         with torch.no_grad():
-            positions = torch.arange(inputs.size(1), device=inputs.device)
+            # positions = torch.arange(inputs.size(1), device=inputs.device)
             # for the update of july, input in batch size 1, avoiding first dimension
-            inputs = inputs[0]
+            # inputs = inputs
 
-            positions = [len(inputs)]
+            positions = [inputs.size(1)]
             return self.model(inputs, positions, **kwargs)
 
     def _loglikelihood_tokens_bad(self, requests: list[Instance], disable_tqdm) -> list[tuple[float, bool]]:
@@ -200,8 +207,8 @@ class Mistral_7b(TemplateLM):
             )  # [batch, padding_len_inp]
 
             multi_logits = F.log_softmax(
-                self._model_call(batched_inps, **call_kwargs)[0], dim=-1
-            ).unsqueeze(0)  # [batch, padding_length (inp or cont), vocab]
+                self._model_call(batched_inps, n_blocks = self.n_blocks, **call_kwargs), dim=-1
+            ) # [batch, padding_length (inp or cont), vocab]
 
             for (request_str, ctx_tokens, _), logits, inplen, cont_toks in zip(
                 chunk, multi_logits, inplens, cont_toks_list

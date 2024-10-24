@@ -12,7 +12,7 @@ from xformers.ops.fmha.attn_bias import AttentionBias, BlockDiagonalCausalMask
 from .args import ModelArgs
 from .lora import LoRALinear
 from .moe import MoeLayer
-from .rope import apply_rotary_emb, precompute_freqs_cis
+from .rope import apply_rotary_emb, precompute_freqs_cis, apply_rotary_emb_batch
 
 from safetensors.torch import load_file
 
@@ -73,32 +73,33 @@ class Attention(nn.Module):
         x: torch.Tensor,
         freqs_cis: torch.Tensor
     ) -> torch.Tensor:
-        seqlen_sum, _ = x.shape
+        
+        b, seqlen_sum, _ = x.shape
 
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-        xq = xq.view(seqlen_sum, self.n_heads, self.args.head_dim)
-        xk = xk.view(seqlen_sum, self.n_kv_heads, self.args.head_dim)
-        xv = xv.view(seqlen_sum, self.n_kv_heads, self.args.head_dim)
-        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+        xq = xq.view(b, seqlen_sum, self.n_heads, self.args.head_dim)
+        xk = xk.view(b, seqlen_sum, self.n_kv_heads, self.args.head_dim)
+        xv = xv.view(b, seqlen_sum, self.n_kv_heads, self.args.head_dim)
+        xq, xk = apply_rotary_emb_batch(xq, xk, freqs_cis=freqs_cis)
 
         key, val = xk, xv
 
         # Repeat keys and values to match number of query heads
-        key, val = repeat_kv(key, val, self.repeats, dim=1)
+        key, val = repeat_kv(key, val, self.repeats, dim=2)
 
         # xformers requires (B=1, S, H, D)
-        xq, key, val = xq[None, ...].transpose(1,2), key[None, ...].transpose(1,2), val[None, ...].transpose(1,2)
+        xq, key, val = xq.transpose(1,2), key.transpose(1,2), val.transpose(1,2)
 
         # Write the attention function the old fashioned way
         att = (xq @ key.transpose(-2, -1)) * (1.0 / torch.sqrt(torch.tensor(key.size(-1))))
         att = att.masked_fill(self.bias[:,:seqlen_sum,:seqlen_sum] == 0, float('-inf'))
         att = torch.nn.functional.softmax(att, dim=-1)
         y = att @ val # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        output = y.transpose(1, 2).contiguous().view(1, seqlen_sum, self.args.dim) # re-assemble all head outputs side by side
+        output = y.transpose(1, 2).contiguous().view(b, seqlen_sum, self.args.dim) # re-assemble all head outputs side by side
 
         # output projection
-        return self.wo(output.view(seqlen_sum, -1))
+        return self.wo(output.view(b, seqlen_sum, -1))
 
 
 class FeedForward(nn.Module):
@@ -218,6 +219,7 @@ class Transformer(nn.Module):
         self,
         input_ids: torch.Tensor,
         seqlens: List[int],
+        n_blocks = 32,
     ) -> torch.Tensor:
         # assert sum(seqlens) == input_ids.shape[0], (sum(seqlens), input_ids.shape[0])
 
@@ -227,8 +229,10 @@ class Transformer(nn.Module):
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
-        for layer in self.layers:
+        for layer in self.layers[n_blocks-1:]:
             h = layer(h, freqs_cis)
+        
+        h = self.layers[-1](h, freqs_cis)
 
         return self.output(self.norm(h)).float()
 
