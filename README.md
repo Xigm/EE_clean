@@ -26,7 +26,15 @@ git clone https://github.com/Xigm/EE_Clean.git
 Install environment with the environment.yml file. Linux OS is requiered.
 
 ```bash
-conda env create -f environment.yml
+conda env create -n your_env_name -f environment.yml
+```
+
+Install Cuda toolkit (version 11.6+, I used 12.3)
+
+```bash
+conda activate your_env_name
+pip install causal-conv1d
+pip install mamba-ssm
 ```
 
 
