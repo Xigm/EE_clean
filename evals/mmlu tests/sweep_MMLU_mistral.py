@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.join(sys.path[0], '../../EleutherAI_Eval_harness'))
 sys.path.append(os.path.join(sys.path[0], '../../'))
 
-from lm_eval.models.mistral_models import Mistral_7b
+from lm_eval.models.mistral_models_EE import Mistral_7b
 from lm_eval import evaluate, simple_evaluate
 from lm_eval.tasks import get_task_dict
 from lm_eval.utils import make_table
@@ -11,7 +11,7 @@ from lm_eval.utils import make_table
 # os.chdir(os.path.join(sys.path[0], './EE_Clean'))
 
 from models.mistral.model import ModelArgs
-from models.mistral.model import Transformer
+from models.mistral.model_EE import Transformer
 from models.mistral.tokenizer import Tokenizer
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
@@ -24,7 +24,7 @@ path_weights = "./weights/mistral/7B-v0.3"
 max_length = 2048*2
 max_gen_tokens = 64
 device = "cuda"
-batch_size = 8
+batch_size = 1
 
 # create your model (could be running finetuning with some custom modeling code)
 if path_weights is not None:
@@ -69,10 +69,33 @@ print("Loading tokenizer...")
 tokenizer = Tokenizer(path_weights + "/tokenizer.model.v3")
 # tokenizer = MistralTokenizer.v3().instruct_tokenizer
 
-
-drops = torch.arange(0, 31, 1)
+dataset = "mmlu"
 n_shots = 5
-results_list = []
+
+# Create directories if they do not exist
+output_dir = f"{path_weigths_EE}/results/{dataset}/baseline"
+os.makedirs(output_dir, exist_ok=True)
+
+# Define the directory and filenames
+output_dir = f"{path_weigths_EE}/results/{dataset}/baseline"
+results_file = f"{output_dir}/{n_shots}_results_list.json"
+drops_file = f"{output_dir}/{n_shots}_layers_dropped.json"
+os.makedirs(output_dir, exist_ok=True)
+
+# Load previous progress if files exist
+if os.path.exists(results_file) and os.path.exists(drops_file):
+    with open(results_file, "r") as f:
+        results_buffer = json.load(f)
+    with open(drops_file, "r") as f:
+        drops_buffer = json.load(f)
+else:
+    results_buffer = []
+    drops_buffer = []
+
+# Determine starting point based on the length of previously saved data
+start_iter = len(results_buffer)
+last_iter = 32
+drops = torch.arange(start_iter, last_iter, 1)
 for layers_dropped in drops:
 
     print(f"Layers dropped: {layers_dropped}")
@@ -120,17 +143,27 @@ for layers_dropped in drops:
         num_fewshot = n_shots,
     )
 
-    results_list.append(results)
+
+    results_buffer.append(results)
+    drops_buffer.append(layers_dropped.item())
 
     print(make_table(results))
 
+    # Append new result to JSON file each iteration
+    with open(f"{output_dir}/{n_shots}_results_list.json", "w") as f:
+        f.write(json.dumps(results_buffer))  # Append as new line for each result
+    
+    with open(f"{output_dir}/{n_shots}_layers_dropped.json", "w") as f:
+        f.write(json.dumps(drops_buffer))  # Append as new line for each result
 
-# save results list, the exits done and the positions, if it does not exist, create it
-if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
-    os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/"+ str(n_shots)+"_results_list.json", "w") as f:
-    json.dump(results_list, f)
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+ +"/"+ str(n_shots)+"_layers_dropped.json", "w") as f:
-    json.dump(drops.tolist(), f)
+# # save results list, the exits done and the positions, if it does not exist, create it
+# if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
+#     os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
+
+# with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/"+ str(n_shots)+"_results_list.json", "w") as f:
+#     json.dump(results_list, f)
+
+# with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+ +"/"+ str(n_shots)+"_layers_dropped.json", "w") as f:
+#     json.dump(drops.tolist(), f)

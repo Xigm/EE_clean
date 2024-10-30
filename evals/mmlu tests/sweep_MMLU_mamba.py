@@ -22,7 +22,7 @@ path_weights = "./weights/mamba/mamba-codestral-7B-v0.1"
 max_length = 2048*2
 max_gen_tokens = 32
 device = "cuda"
-batch_size = 16
+batch_size = 4
 recompute_states = False
 
 
@@ -87,9 +87,33 @@ tokenizer = Tokenizer("./weights/mamba/mamba-codestral-7B-v0.1/tokenizer.model.v
 # tokenizer = MistralTokenizer.v3().instruct_tokenizer
 
 
-drops = torch.arange(0, 63, 1)
+dataset = "mmlu"
 n_shots = 5
-results_list = []
+
+# Create directories if they do not exist
+output_dir = f"{path_weigths_EE}/results/{dataset}/baseline"
+os.makedirs(output_dir, exist_ok=True)
+
+# Define the directory and filenames
+output_dir = f"{path_weigths_EE}/results/{dataset}/baseline"
+results_file = f"{output_dir}/{n_shots}_results_list.json"
+drops_file = f"{output_dir}/{n_shots}_layers_dropped.json"
+os.makedirs(output_dir, exist_ok=True)
+
+# Load previous progress if files exist
+if os.path.exists(results_file) and os.path.exists(drops_file):
+    with open(results_file, "r") as f:
+        results_buffer = json.load(f)
+    with open(drops_file, "r") as f:
+        drops_buffer = json.load(f)
+else:
+    results_buffer = []
+    drops_buffer = []
+
+# Determine starting point based on the length of previously saved data
+start_iter = len(results_buffer)
+last_iter = 64
+drops = torch.arange(start_iter, last_iter, 1)
 for layers_dropped in drops:
 
     print(f"Layers dropped: {layers_dropped}")
@@ -132,24 +156,30 @@ for layers_dropped in drops:
     # triviaqa
     # coqa
     # generate_until
-    dataset = "mmlu"
     results = simple_evaluate(
         model = lm_obj,
         tasks = [dataset],
         num_fewshot = n_shots,
     )
 
-    results_list.append(results)
+    results_buffer.append(results)
+    drops_buffer.append(layers_dropped.item())
 
     print(make_table(results))
 
+    # Append new result to JSON file each iteration
+    with open(f"{output_dir}/{n_shots}_results_list.json", "w") as f:
+        f.write(json.dumps(results_buffer))  # Append as new line for each result
+    
+    with open(f"{output_dir}/{n_shots}_layers_dropped.json", "w") as f:
+        f.write(json.dumps(drops_buffer))  # Append as new line for each result
 
-# save results list, the exits done and the positions, if it does not exist, create it
-if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
-    os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
+# # save results list, the exits done and the positions, if it does not exist, create it
+# if not os.path.exists(path_weigths_EE + f"/results/" + dataset + "/baseline"):
+#     os.makedirs(path_weigths_EE + f"/results/" + dataset + "/baseline")
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/" + n_shots + "_results_list.json", "w") as f:
-    json.dump(results_list.tolist(), f)
+# with open(path_weigths_EE + f"/results/"+dataset+ "/baseline" +"/" + str(n_shots) + "_results_list.json", "w") as f:
+#     json.dump(results_list.tolist(), f)
 
-with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+"/" + n_shots + "_layers_dropped.json", "w") as f:
-    json.dump(drops.tolist(), f)
+# with open(path_weigths_EE + f"/results/"+dataset+ "/baseline"+"/" + str(n_shots) + "_layers_dropped.json", "w") as f:
+#     json.dump(drops.tolist(), f)

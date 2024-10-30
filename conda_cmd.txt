@@ -1,7 +1,0 @@
-conda create -n your_env_name
-conda activate your_env_name
-conda install python=3.11.9
-pip3 install torch torchvision torchaudio
-pip3 install mamba-ssm
-conda env update -f environment.yml
-pip install sacrebleu scikit_learn transformers sqlitedict peft more_itertools dill datasets mistral_common simple_parsing matplotlib xformers pytablewritter causal-conv1d

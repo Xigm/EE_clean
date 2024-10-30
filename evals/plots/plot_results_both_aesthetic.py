@@ -6,12 +6,12 @@ sys.path.append(os.path.join(sys.path[0], '../../../'))
 # path = f"./weights/mistral"
 # path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_15_19_23_27"
 # dataset = "truthfulqa_gen"
-# submetric = "diff" # acc, diff, max
+# submetric = "max" # acc, diff, max
 # baseline = True
 
 path = "./weights/mamba"
 path_weights_EE = path + f"/EE_1_layers_middle_2_wsum_pos_31_39_47_55"
-dataset = "triviaqa"
+dataset = "truthfulqa_gen"
 recomputation = True
 submetric = "max" # acc, diff, max
 baseline = True
@@ -200,10 +200,29 @@ layers_dropped_baseline = [l for l in layers_dropped_baseline if l != -1]
 
 range_th_recomp = [th for i, th in enumerate(range_th) if i not in skip_recomp]
 range_th_norecomp = [th for i, th in enumerate(range_th) if i not in skip_norecomp]
+
+
+import seaborn as sns
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.pyplot as plt
+
+# Update matplotlib rcParams for LaTeX rendering
+sns.set_theme(style="whitegrid")
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.size': 12,
+    'axes.titlesize': 16,
+    'axes.titleweight': 'bold',
+    'axes.labelsize': 14,
+    'axes.labelweight': 'bold',
+})
+
+# sns.set_theme(style="whitegrid")  # Apply Seaborn style to the plots
+
 for j, (metric_r, metric_nr) in enumerate(zip(metric_values, metric_values_norecomp)):
-    # plot speedups vs y
     plt.figure(figsize=(10, 5)) 
 
+    # Set legend based on metric type
     if "exact_match" in metrics[j]:
         legend = "Exact Match"
     elif "f1" in metrics[j]:
@@ -221,156 +240,95 @@ for j, (metric_r, metric_nr) in enumerate(zip(metric_values, metric_values_norec
 
     # Normalize the colors array for proper color mapping
     norm = plt.Normalize(vmin=min(range_th_norecomp), vmax=max(range_th_norecomp))
-    cmap = plt.get_cmap('winter')
+    cmap = sns.color_palette("winter", as_cmap=True)  # Use Seaborn color palette for a smoother gradient
 
-    # # Define your colors: #102C53 for value 1, white for value 0
-    # colors = ['#FFFFFF', '#102C53']
-    # # Create a colormap
-    # cmap = LinearSegmentedColormap.from_list('custom_cmap', colors) 
+    # Plot lines
+    plt.plot(speedups_recomp, metric_r, color='#0BA4FF', zorder=1, label="Early exits Recomp")
+    plt.plot(speedups_norecomp, metric_nr, color='#AEDD00', zorder=1, label="Early exits No Recomp")
 
-    # Plot the line (without color)
-    plt.plot(speedups_recomp, metric_r, color='#0BA4FF', zorder=1, label = "Early exits Recomp")
-    plt.plot(speedups_norecomp, metric_nr, color='#AEDD00', zorder=1, label = "Early exits No Recomp")
-
-
-    # Plot the points with colors
+    # Plot points with colors
     scatter = plt.scatter(speedups_recomp, metric_r, c=range_th_recomp, cmap=cmap, norm=norm, marker='D')
-    scatter = plt.scatter(speedups_norecomp, metric_nr, c=range_th_norecomp, cmap=cmap, norm=norm, marker='D')
+    plt.scatter(speedups_norecomp, metric_nr, c=range_th_norecomp, cmap=cmap, norm=norm, marker='D')
 
-    # Add colorbar to the plot
+    # Add colorbar
     plt.colorbar(scatter, label='Threshold Value')
 
-    # add the baseline as scatter
+    # Baseline as scatter
     if baseline:
-        plt.scatter(n_layers/(n_layers-(torch.tensor(layers_dropped_baseline))), bl_values[j], color='#FF8C8C', zorder=2, label = "Layer Pruning")
+        plt.scatter(n_layers / (n_layers - torch.tensor(layers_dropped_baseline)), bl_values[j], color='#FF8C8C', zorder=2, label="Layer Pruning")
 
-    plt.xlabel('Computational reduction factor')
-    plt.ylabel(legend)
-    # plt legend, baseline should be appear only once
-    
-    if dataset == "truthfulqa_gen":
-        dataset_name = "TruthfulQA"
-    elif dataset == "triviaqa":
-        dataset_name = "TriviaQA"
-    elif dataset == "coqa":
-        dataset_name = "CoQA"
+    plt.xlabel('Computational Reduction Factor', weight='bold')
+    plt.ylabel(legend, weight='bold')
 
-    plt.legend()
-    plt.title(f"Speedup vs {legend} for {dataset_name} dataset")  
+    # Dataset name assignment
+    dataset_name = {"truthfulqa_gen": "TruthfulQA", "triviaqa": "TriviaQA", "coqa": "CoQA"}.get(dataset, dataset)
+
+    plt.legend(fancybox=True, framealpha=1, shadow=True)
+
+    plt.title(f"Speedup vs {legend} for {dataset_name} Dataset")
     model_name = "mistral" if "mistral" in path_weights_EE else "mamba"
-    plt.grid()
+    plt.grid(visible=True, linestyle=':', linewidth=0.7)
 
 
-    plt.savefig(f"{path_weights_EE}/results/"+dataset+"/final_"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+"_"+dataset+".png", dpi = 400)
-    
-    # check if the folder exists, if not create it
-    # import os
-    # if not os.path.exists(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp):
-    #     os.makedirs(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp)
-    # plt.savefig(f"./TEST/{path_weights_EE[1:]}/results/"+dataset+recomp+"/"+model_name+"_speedup_vs_"+metrics[j].split(",")[0]+".png")
-  
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-# Add the functionality to combine both figures in a subfigure if dataset is "coqa"
-# Add the functionality to combine both figures in a subfigure if dataset is "coqa"
+    # Save individual plot
+    plt.savefig(f"{path_weights_EE}/results/{dataset}/final_{model_name}_speedup_vs_{metrics[j].split(',')[0]}_{dataset}.png", dpi=400)
+
+# Generate combined figures based on dataset
 if dataset == "coqa":
-    fig, axs = plt.subplots(1, 2, figsize=(15, 5))  # Create two subplots in a single figure
-    
+    fig, axs = plt.subplots(1, 2, figsize=(15, 5))
     for j, (metric_r, metric_nr) in enumerate(zip(metric_values, metric_values_norecomp)):
-        if j == 0:
-            ax = axs[0]
-            metric_legend = "F1"
-        else:
-            ax = axs[1]
-            metric_legend = "Exact Match"
+        ax = axs[j]
+        metric_legend = "F1" if j == 0 else "Exact Match"
         
-        # Normalize the colors array for proper color mapping
-        norm = plt.Normalize(vmin=min(range_th_norecomp), vmax=max(range_th_norecomp))
-        cmap = plt.get_cmap('winter')
-        
-        # Plot the line for recomputation and no recomputation
         ax.plot(speedups_recomp, metric_r, color='#0BA4FF', zorder=1, label="Early exits Recomp")
         ax.plot(speedups_norecomp, metric_nr, color='#AEDD00', zorder=1, label="Early exits No Recomp")
-
-        # Plot the points with colors
-        scatter = ax.scatter(speedups_recomp, metric_r, c=range_th_recomp, cmap=cmap, norm=norm, marker='D')
+        ax.scatter(speedups_recomp, metric_r, c=range_th_recomp, cmap=cmap, norm=norm, marker='D')
         ax.scatter(speedups_norecomp, metric_nr, c=range_th_norecomp, cmap=cmap, norm=norm, marker='D')
-
-        # Add the baseline as scatter points
+        
         if baseline:
-            ax.scatter(n_layers / (n_layers - torch.tensor(layers_dropped_baseline)), bl_values[j], 
-                       color='#FF8C8C', zorder=2, label="Layer Pruning")
+            ax.scatter(n_layers / (n_layers - torch.tensor(layers_dropped_baseline)), bl_values[j], color='#FF8C8C', zorder=2, label="Layer Pruning")
 
-        ax.set_xlabel('Computational reduction factor')
-        ax.set_ylabel(metric_legend)
-        ax.grid()
+        ax.set_xlabel('Computational Reduction Factor', weight='bold')
+        ax.set_ylabel(metric_legend, weight='bold')
         ax.set_title(f"Speedup vs {metric_legend}")
+        ax.grid(visible=True, linestyle=':', linewidth=0.7)
 
-        # Add individual legends back to each subplot
-        ax.legend()
+        ax.legend(fancybox=True, framealpha=1, shadow=True)
 
-    # Adjust layout to ensure space for colorbar and prevent overlapping
-    plt.tight_layout(rect=[0, 0, 0.85, 1])  # Adjust to leave space for colorbar on the right
 
-    # Create a divider for colorbar in the second axis (Exact Match plot)
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+
     divider = make_axes_locatable(axs[1])
-    cax = divider.append_axes("right", size="5%", pad=0.05)  # Adjust size and padding for the colorbar
-    
-    # Add the colorbar to the right of the figure (shared across both subplots)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
     fig.colorbar(scatter, cax=cax, label='Threshold Value')
 
-    # Save the combined subfigure
-    plt.savefig(f"{path_weights_EE}/results/" + dataset + "/final_" + model_name + "_speedup_vs_combined_" + dataset + ".png", dpi = 400)
-
-
+    plt.savefig(f"{path_weights_EE}/results/{dataset}/final_{model_name}_speedup_vs_combined_{dataset}.png", dpi=400)
 
 if dataset == "truthfulqa_gen":
-    fig, axs = plt.subplots(2, 2, figsize=(15, 10))  # Create two subplots in a single figure
-    map = {0:[0,0], 1:[0,1], 2:[1,0], 3:[1,1]}
+    fig, axs = plt.subplots(2, 2, figsize=(15, 10))
     for j, (metric_r, metric_nr) in enumerate(zip(metric_values, metric_values_norecomp)):
-    
-        ax = axs[*map[j]]
+        ax = axs[j // 2, j % 2]
+        metric_legend = ["BLEU", "ROUGE-1", "ROUGE-2", "ROUGE-L"][j]
 
-        if j == 0:
-            metric_legend = "BLEU"
-        elif j == 1:
-            metric_legend = "ROUGE-1"
-        elif j == 2:
-            metric_legend = "ROUGE-2"
-        elif j == 3:
-            metric_legend = "ROUGE-L"        
-        
-        # Normalize the colors array for proper color mapping
-        norm = plt.Normalize(vmin=min(range_th_norecomp), vmax=max(range_th_norecomp))
-        cmap = plt.get_cmap('winter')
-        
-        # Plot the line for recomputation and no recomputation
         ax.plot(speedups_recomp, metric_r, color='#0BA4FF', zorder=1, label="Early exits Recomp")
         ax.plot(speedups_norecomp, metric_nr, color='#AEDD00', zorder=1, label="Early exits No Recomp")
-
-        # Plot the points with colors
-        scatter = ax.scatter(speedups_recomp, metric_r, c=range_th_recomp, cmap=cmap, norm=norm, marker='D')
+        ax.scatter(speedups_recomp, metric_r, c=range_th_recomp, cmap=cmap, norm=norm, marker='D')
         ax.scatter(speedups_norecomp, metric_nr, c=range_th_norecomp, cmap=cmap, norm=norm, marker='D')
 
-        # Add the baseline as scatter points
         if baseline:
-            ax.scatter(n_layers / (n_layers - torch.tensor(layers_dropped_baseline)), bl_values[j], 
-                       color='#FF8C8C', zorder=2, label="Layer Pruning")
+            ax.scatter(n_layers / (n_layers - torch.tensor(layers_dropped_baseline)), bl_values[j], color='#FF8C8C', zorder=2, label="Layer Pruning")
 
-        ax.set_xlabel('Computational reduction factor')
-        ax.set_ylabel(metric_legend)
-        ax.grid()
+        ax.set_xlabel('Computational Reduction Factor', weight='bold')
+        ax.set_ylabel(metric_legend, weight='bold')
         ax.set_title(f"Speedup vs {metric_legend}")
+        ax.grid(visible=True, linestyle=':', linewidth=0.7)
+        ax.legend(fancybox=True, framealpha=1, shadow=True)
+        
 
-        # Add individual legends back to each subplot
-        ax.legend()
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
 
-    # Adjust layout to ensure space for colorbar and prevent overlapping
-    plt.tight_layout(rect=[0, 0, 0.85, 1])  # Adjust to leave space for colorbar on the right
-
-    # Create a colorbar axis to the right of all subplots
-    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])
     cbar = fig.colorbar(scatter, cax=cbar_ax)
-    cbar.set_label('Threshold Value')  # Add a label to the colorbar
+    cbar.set_label('Threshold Value')
 
-    # Save the combined subfigure
-    plt.savefig(f"{path_weights_EE}/results/" + dataset + "/final_"+submetric+"_" + model_name + "_speedup_vs_combined_" + dataset + ".png", dpi=400)
+    plt.savefig(f"{path_weights_EE}/results/{dataset}/final_{submetric}_{model_name}_speedup_vs_combined_{dataset}.png", dpi=500)
