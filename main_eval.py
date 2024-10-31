@@ -125,6 +125,17 @@ def eval_mistral(task, n_shots = None, max_gen_tokens = 64, temperature = 1.0, t
 
     print(make_table(results))
 
+    if th_for_EE == 1:
+            exits_done = 0
+            positions_exited = None
+    else:
+        exits_done = lm_obj.model.exits_done
+        positions_exited = lm_obj.model.positions_exit
+
+    lens_generated = lm_obj.model.lens_generated
+
+    return exits_done, positions_exited, lens_generated
+
 def eval_mamba(dataset, n_shots = None, max_gen_tokens = 64, temperature = 1.0, topk = None, recompute_states = False, use_EE = True, th_for_EE = 0.6):
     
 
@@ -224,6 +235,74 @@ def eval_mamba(dataset, n_shots = None, max_gen_tokens = 64, temperature = 1.0, 
 
     print(make_table(results))
 
+    if th_for_EE == 1:
+            exits_done = 0
+            positions_exited = None
+    else:
+        exits_done = lm_obj.model.exits_done
+        positions_exited = lm_obj.model.positions_exit
+
+    lens_generated = lm_obj.model.lens_generated
+
+    return exits_done, positions_exited, lens_generated
+
+def compute_speedup(exits_done, positions_exited, lens_generated, model, dataset, recomp):
+    threshold_deg_res = 100 if dataset == "truthfulqa_gen" else 50
+    threshold_deg_res_mamba = 411 if dataset == "truthfulqa_gen" else 100
+    n_layers = 32 if "mistral" in model else 64
+    penalize_mistral = 4/24
+    penalize_mamba = 9/26
+    if "mistral" in model:
+        # recomp
+        if exits_done == [] or exits_done == 0:
+            speedup_r = 1
+        else:
+            # for ex, pos, len in zip(exits_done, positions_exited, lens_generated):
+            # speedup_r += n_layers/torch.tensor(ex, dtype = torch.float).mean()
+            lens = torch.tensor(lens_generated, dtype = torch.float)
+            deg_res = sum(lens == -1)
+            lens[lens == -1] = (lens+1).mean()
+
+            if deg_res > threshold_deg_res:
+                print("Too many degenarated responses")
+                return None
+
+            else:
+                total_blocks = sum(torch.tensor(lens_generated, dtype = torch.float) - 1) * n_layers
+                blocks_ignored = sum(n_layers - torch.tensor(exits_done, dtype = torch.float) + 1)
+                pen = sum(n_layers - torch.tensor(exits_done, dtype = torch.float) + 1)*penalize_mistral
+                
+                if recomp:
+                    speedup_r = total_blocks / (total_blocks - blocks_ignored + pen)
+                else:
+                    speedup_r = total_blocks / (total_blocks - blocks_ignored)
+
+
+
+    elif "mamba" in model:
+
+        if exits_done == [] or exits_done == 0:
+            speedup_r = 1
+        else:
+            lens = torch.tensor(lens_generated, dtype = torch.float)
+            deg_res = sum(lens == -1)
+            lens[lens == -1] = 32 if dataset == "truthfulqa_gen" else lens.mean()
+
+            if deg_res > threshold_deg_res_mamba:
+                print("Too many degenarated responses")
+                return None
+            else:
+                total_blocks = sum(torch.tensor(lens, dtype = torch.float) - 1) * n_layers
+                blocks_ignored = sum(n_layers - torch.tensor(exits_done, dtype = torch.float))
+                pen = sum(n_layers - torch.tensor(exits_done, dtype = torch.float) + 1)*penalize_mamba
+                
+                if recomp:
+                    speedup_r = total_blocks / (total_blocks - blocks_ignored + pen)
+                else:
+                    speedup_r = total_blocks / (total_blocks - blocks_ignored)
+
+    print(f"Speedup: {speedup_r}")
+    return speedup_r
 
 
 if __name__ == "__main__":
@@ -243,8 +322,10 @@ if __name__ == "__main__":
     model = config.get("model", "mistral")
 
     if model == "mistral":
-        eval_mistral(task, n_shots, max_gen_tokens, temperature, topk, recomp, use_EE, th_for_EE)
+        exits_done, positions_exited, lens_generated = eval_mistral(task, n_shots, max_gen_tokens, temperature, topk, recomp, use_EE, th_for_EE)
     elif model == "mamba":
-        eval_mamba(task, n_shots, max_gen_tokens, temperature, topk, recomp, use_EE, th_for_EE)
+        exits_done, positions_exited, lens_generated = eval_mamba(task, n_shots, max_gen_tokens, temperature, topk, recomp, use_EE, th_for_EE)
     else:
-        print("Model not found")    
+        raise "Model not found"
+
+    compute_speedup(exits_done, positions_exited, lens_generated, model, task, recomp)
